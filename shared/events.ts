@@ -7,5 +7,6 @@ export const InventoryEvents = {
     RPC: {},
     Webview: {
         Inventory_UpdateItems: 'inventory:update-items',
+        Inventory_UpdateToolbar: 'inventory:update-toolbar',
     },
 };
