@@ -4,6 +4,8 @@
             <div
                 v-if="selectedItem"
                 class="flex h-full select-none flex-col rounded-xl border border-white/10 bg-gradient-to-b from-white/10 to-transparent backdrop-blur-sm"
+                draggable="true"
+                @dragstart="handleDragStart"
             >
                 <!-- Header -->
                 <div class="border-b border-white/10 p-6">
@@ -87,35 +89,44 @@
                         </button>
                         <Transition name="slide">
                             <div v-show="isQuickAccessVisible" class="grid grid-cols-5 gap-2">
-                                <button
+                                <div
                                     v-for="n in 5"
                                     :key="n"
-                                    @click="$emit('assign-hotkey', selectedItem, n - 1)"
                                     class="group relative aspect-square overflow-hidden"
+                                    @click="assignToHotkey(n - 1)"
+                                    @contextmenu.prevent="removeFromHotkey(n - 1)"
+                                    :class="{ 'cursor-pointer': true }"
                                 >
                                     <div
                                         class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-purple-500/20 opacity-0 blur transition-all duration-300 group-hover:opacity-100"
                                     ></div>
                                     <div
                                         class="relative flex h-full w-full items-center justify-center rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-transparent transition-all duration-300 group-hover:border-white/30"
-                                        :class="[
-                                            getHotkeyNumber(selectedItem) === n
-                                                ? 'border-blue-500/50 from-blue-500/20'
-                                                : '',
-                                        ]"
+                                        :class="{
+                                            'border-blue-500/50 from-blue-500/20': currentSlot === n - 1,
+                                            'border-yellow-500/50': isSlotOccupied(n - 1) && currentSlot !== n - 1,
+                                        }"
                                     >
-                                        <span
-                                            class="text-sm transition-all duration-300 group-hover:scale-110"
-                                            :class="[
-                                                getHotkeyNumber(selectedItem) === n
-                                                    ? 'text-blue-400'
-                                                    : 'text-gray-500 group-hover:text-gray-300',
-                                            ]"
-                                        >
-                                            {{ n }}
-                                        </span>
+                                        <div class="flex flex-col items-center gap-1">
+                                            <span
+                                                class="text-lg transition-all duration-300 group-hover:scale-110"
+                                                :class="{
+                                                    'text-blue-400': currentSlot === n - 1,
+                                                    'text-yellow-500': isSlotOccupied(n - 1) && currentSlot !== n - 1,
+                                                    'text-gray-500 group-hover:text-gray-300': !isSlotOccupied(n - 1),
+                                                }"
+                                            >
+                                                {{ n }}
+                                            </span>
+                                            <span
+                                                v-if="isSlotOccupied(n - 1) && currentSlot !== n - 1"
+                                                class="text-xs text-yellow-500/80"
+                                            >
+                                                Occupied
+                                            </span>
+                                        </div>
                                     </div>
-                                </button>
+                                </div>
                             </div>
                         </Transition>
                     </div>
@@ -168,7 +179,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { Item } from '@Shared/types/items';
 
 const props = defineProps<{
@@ -176,8 +187,20 @@ const props = defineProps<{
     toolbarItems: Array<Item | null>;
 }>();
 
+const emit = defineEmits<{
+    (e: 'use-item', item: Item): void;
+    (e: 'drop-item', item: Item): void;
+    (e: 'assign-hotkey', item: Item, slot: number): void;
+    (e: 'remove-hotkey', slot: number): void;
+}>();
+
 const isPropertiesVisible = ref(true);
 const isQuickAccessVisible = ref(true);
+
+const currentSlot = computed(() => {
+    if (!props.selectedItem) return -1;
+    return props.toolbarItems.findIndex((item) => item?.uid === props.selectedItem?.uid);
+});
 
 const getItemType = (item: Item): string => {
     if (item.id.includes('weapon')) return 'Weapon';
@@ -186,9 +209,8 @@ const getItemType = (item: Item): string => {
     return 'Item';
 };
 
-const getHotkeyNumber = (item: Item): number | null => {
-    const index = props.toolbarItems.findIndex((i) => i?.uid === item.uid);
-    return index !== -1 ? index + 1 : null;
+const isSlotOccupied = (slot: number): boolean => {
+    return props.toolbarItems[slot] !== null;
 };
 
 const formatKey = (key: string): string => {
@@ -212,6 +234,31 @@ const getValueColor = (key: string, value: any): string => {
         return 'text-red-400';
     }
     return 'text-white';
+};
+
+const assignToHotkey = (slot: number) => {
+    if (!props.selectedItem) return;
+    console.log('[DEBUG] Assigning item to hotkey:', { item: props.selectedItem.name, slot });
+    emit('assign-hotkey', props.selectedItem, slot);
+};
+
+const removeFromHotkey = (slot: number) => {
+    console.log('[DEBUG] Removing item from hotkey:', slot);
+    if (props.toolbarItems[slot]) {
+        emit('remove-hotkey', slot);
+    }
+};
+
+const handleDragStart = (event: DragEvent) => {
+    if (!props.selectedItem || !event.dataTransfer) return;
+
+    console.log('[DEBUG] Starting drag from details panel:', props.selectedItem.name);
+    event.dataTransfer.setData('application/json', JSON.stringify(props.selectedItem));
+    event.dataTransfer.effectAllowed = 'move';
+
+    const img = new Image();
+    img.src = props.selectedItem.icon;
+    event.dataTransfer.setDragImage(img, 36, 36);
 };
 </script>
 

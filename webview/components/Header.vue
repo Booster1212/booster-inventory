@@ -24,9 +24,12 @@
                             </div>
                             <div class="h-8 w-24 overflow-hidden rounded-md border border-white/5 bg-white/5">
                                 <div
-                                    class="h-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 transition-all duration-300"
+                                    class="h-full bg-gradient-to-r transition-all duration-300"
+                                    :class="{
+                                        'from-blue-500/20 to-purple-500/20': !isOverweight,
+                                        'from-red-500/20 to-red-400/20': isOverweight,
+                                    }"
                                     :style="{ width: `${getWeightPercentage}%` }"
-                                    :class="{ 'from-red-500/20 to-red-400/20': isOverweight }"
                                 ></div>
                             </div>
                         </div>
@@ -46,20 +49,37 @@
 
                 <div class="flex items-center gap-2">
                     <div class="text-xs text-gray-500">Quick Access</div>
-                    <div class="flex items-end justify-center space-x-2">
+                    <div class="toolbar-container flex items-end justify-center space-x-2">
                         <!-- Toolbar Slots -->
-                        <div v-for="(item, index) in toolbarItems" :key="index" class="group relative">
+                        <div
+                            v-for="(item, index) in toolbarItems"
+                            :key="index"
+                            class="group relative"
+                            @contextmenu.prevent="removeFromHotkey(index)"
+                            @dragover.prevent
+                            @drop.prevent="handleDrop($event, index)"
+                            @dragenter.prevent="handleDragEnter(index)"
+                            @dragleave.prevent="handleDragLeave(index)"
+                        >
                             <div class="absolute -top-6 left-1/2 -translate-x-1/2 text-sm text-blue-400/80">
                                 {{ index + 1 }}
                             </div>
 
                             <div class="relative overflow-hidden">
                                 <div
-                                    class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-purple-500/20 opacity-0 blur transition-all duration-300 group-hover:opacity-100"
+                                    class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-purple-500/20 opacity-0 blur transition-all duration-300"
+                                    :class="{
+                                        'group-hover:opacity-100': true,
+                                        'opacity-100': activeDropSlot === index,
+                                    }"
                                 ></div>
 
                                 <div
-                                    class="relative h-[72px] w-[72px] rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-transparent backdrop-blur-sm transition-all duration-300 group-hover:border-white/30"
+                                    class="relative h-[72px] w-[72px] rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-transparent backdrop-blur-sm transition-all duration-300"
+                                    :class="{
+                                        'border-blue-500/50': activeDropSlot === index,
+                                        'group-hover:border-white/30': activeDropSlot !== index,
+                                    }"
                                 >
                                     <div
                                         v-if="!item"
@@ -97,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import { InventoryConfig } from '../../shared/config';
 import { Item } from '@Shared/types/items';
 
@@ -108,7 +128,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'use-item', item: Item): void;
+    (e: 'remove-hotkey', slot: number): void;
+    (e: 'assign-hotkey', item: Item, slot: number): void;
 }>();
+
+const activeDropSlot = ref<number | null>(null);
 
 const getWeightPercentage = computed(() => {
     return Math.min((parseFloat(props.totalWeight) / InventoryConfig.itemManager.weight.maxWeight) * 100, 100);
@@ -118,9 +142,53 @@ const isOverweight = computed(() => {
     return parseFloat(props.totalWeight) > InventoryConfig.itemManager.weight.maxWeight;
 });
 
-const handleItemClick = (item: Item) => {
-    if (!isOverweight.value) {
-        emit('use-item', item);
+// Drag and Drop handlers
+const handleDrop = async (event: DragEvent, index: number) => {
+    event.preventDefault();
+    const itemData = event.dataTransfer?.getData('application/json');
+    if (itemData) {
+        try {
+            const item = JSON.parse(itemData);
+            console.log('[DEBUG] Dropping item into toolbar slot:', { item, slot: index });
+            emit('assign-hotkey', item, index);
+        } catch (error) {
+            console.error('[DEBUG] Error handling toolbar drop:', error);
+        }
+    }
+    activeDropSlot.value = null;
+};
+
+const handleDragEnter = (index: number) => {
+    event?.preventDefault();
+    console.log('[DEBUG] Drag entered toolbar slot:', index);
+    activeDropSlot.value = index;
+};
+
+const handleDragLeave = (index: number) => {
+    event?.preventDefault();
+    if (activeDropSlot.value === index) {
+        console.log('[DEBUG] Drag left toolbar slot:', index);
+        activeDropSlot.value = null;
     }
 };
+
+const removeFromHotkey = (index: number) => {
+    console.log('[DEBUG] Removing item from toolbar slot:', index);
+    emit('remove-hotkey', index);
+};
 </script>
+
+<style scoped>
+.toolbar-container {
+    position: relative;
+    z-index: 50;
+}
+
+.toolbar-slot-hover {
+    @apply border-blue-500/50;
+}
+
+.toolbar-slot-active {
+    @apply border-blue-500;
+}
+</style>
