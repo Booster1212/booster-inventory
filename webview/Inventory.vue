@@ -19,6 +19,7 @@
                         :inventory="inventory"
                         :toolbarItems="toolbarItems"
                         @select-item="selectItem"
+                        @swap-items="handleSwapItems"
                     />
                 </div>
 
@@ -99,6 +100,15 @@ const toolbarItems = ref<(Item | null)[]>([null, null, null, null, null]);
 const totalWeight = computed(() => {
     return inventory.value.reduce((acc, item) => acc + item.weight * item.quantity, 0).toFixed(1);
 });
+
+const handleSwapItems = (fromIndex: number, toIndex: number) => {
+    const newInventory = [...inventory.value];
+    [newInventory[fromIndex], newInventory[toIndex]] = [newInventory[toIndex], newInventory[fromIndex]];
+
+    inventory.value = newInventory;
+
+    // events.emitServer(InventoryEvents.Server.Inventory_UpdateItems, newInventory);
+};
 
 const validateToolbarItem = (item: unknown): item is Item => {
     if (!item || typeof item !== 'object') return false;
