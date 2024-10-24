@@ -14,17 +14,12 @@ Messenger.commands.register({
         const rebarDocument = Rebar.document.character.useCharacter(player).get();
         const items = rebarDocument.items || [];
 
-        // Log full inventory contents
         console.log('=== Inventory Debug ===');
         console.log(`Total items: ${items.length}`);
         items.forEach((item, index) => {
             console.log(`${index + 1}. ${item.name} (${item.uid}) - Qty: ${item.quantity}`);
         });
 
-        // Also log the raw document for inspection
-        console.log('Raw document:', JSON.stringify(rebarDocument, null, 2));
-
-        // Send feedback to player
         Messenger.message.send(player, {
             content: `Inventory contains ${items.length} items. Check server console for details.`,
             type: 'info',
@@ -32,7 +27,6 @@ Messenger.commands.register({
     },
 });
 
-// Also let's enhance the additem command with better feedback
 Messenger.commands.register({
     name: 'additem',
     desc: 'Adds item with quantity',
@@ -45,6 +39,8 @@ Messenger.commands.register({
 
         try {
             const result = await ItemAPI.usePlayerItemManager(player).add(name, parseInt(quantity));
+            if (!result) return;
+
             const rebarDocument = Rebar.document.character.useCharacter(player).get();
 
             console.log(`Added item ${name} x${quantity}. Current inventory size: ${rebarDocument.items?.length || 0}`);
