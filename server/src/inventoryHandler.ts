@@ -20,33 +20,48 @@ alt.onClient(InventoryEvents.Server.Inventory_UseItem, (player: alt.Player, item
 alt.on('inventory:useWeapon', async (player: alt.Player, item: Item) => {
     try {
         const rPlayer = Rebar.document.character.useCharacter(player);
-        const playerWeapons = rPlayer.get().weapons;
-        const hasWeapon = playerWeapons?.find((x) => x.hash === alt.hash(item.id));
+        const playerData = rPlayer.get();
+        const playerWeapons = playerData.weapons || [];
 
-        if (playerWeapons && playerWeapons.length > 0) {
-            for (const weapon of playerWeapons) {
-                await Rebar.player.useWeapon(player).clearWeapon(weapon.hash);
-            }
+        const weaponHash = alt.hash(item.id);
+        const hasWeapon = playerWeapons.some((w) => w.hash === weaponHash);
 
-            if (hasWeapon) {
-                await Rebar.usePlayer(player).animation.playFinite(
-                    'reaction@intimidation@1h',
-                    'outro',
-                    47,
-                    2000,
-                    false,
-                );
-                return;
-            }
+        if (hasWeapon) {
+            await Rebar.player.useWeapon(player).clearWeapon(weaponHash);
+
+            const updatedWeapons = playerWeapons.filter((w) => w.hash !== weaponHash);
+            rPlayer.set('weapons', updatedWeapons);
+
+            await Rebar.usePlayer(player).animation.playFinite('reaction@intimidation@1h', 'outro', 47, 2000, false);
+
+            return;
         }
 
-        await Rebar.usePlayer(player).animation.playFinite('reaction@intimidation@1h', 'intro', 47, 2250, false);
+        for (const weapon of playerWeapons) {
+            await Rebar.player.useWeapon(player).clearWeapon(weapon.hash);
+        }
 
         await Rebar.player.useWeapon(player).add(item.id, 50);
 
-        Rebar.player.useAudio(player).playSound('../../sounds/killing_time_029.ogg');
+        rPlayer.set('weapons', [
+            {
+                hash: weaponHash,
+                ammo: 50,
+                tintIndex: 0,
+                components: [],
+            },
+        ]);
+
+        await Rebar.usePlayer(player).animation.playFinite('reaction@intimidation@1h', 'intro', 47, 2250, false);
+
+        // Rebar.player.useAudio(player).playSound('../../sounds/killing_time_029.ogg');
     } catch (error) {
+        const rPlayer = Rebar.document.character.useCharacter(player);
+
         console.error(`Error handling weapon ${item.id}:`, error);
+        const weaponHash = alt.hash(item.id);
+        await Rebar.player.useWeapon(player).clearWeapon(weaponHash);
+        rPlayer.set('weapons', []);
     }
 });
 

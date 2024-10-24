@@ -1,7 +1,6 @@
+import * as alt from 'alt-server';
 import { useApi } from '@Server/api/index.js';
 import { useMessenger } from '@Server/systems/messenger.js';
-import { RebarItems } from '@Shared/types/items.js';
-import * as alt from 'alt-server';
 import { updateInventoryWebview } from './inventoryHandler.js';
 import { useRebar } from '@Server/index.js';
 

@@ -8,5 +8,6 @@ export const InventoryEvents = {
     Webview: {
         Inventory_UpdateItems: 'inventory:update-items',
         Inventory_UpdateToolbar: 'inventory:update-toolbar',
+        Inventory_KeyPress: 'inventory:key-press',
     },
 };
