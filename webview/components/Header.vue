@@ -142,7 +142,6 @@ const isOverweight = computed(() => {
     return parseFloat(props.totalWeight) > InventoryConfig.itemManager.weight.maxWeight;
 });
 
-// Drag and Drop handlers
 const handleDrop = async (event: DragEvent, index: number) => {
     event.preventDefault();
     const itemData = event.dataTransfer?.getData('application/json');

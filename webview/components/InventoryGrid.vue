@@ -15,14 +15,13 @@
                         @mouseup="handleMouseUp($event, i - 1)"
                         @mouseenter="handleMouseEnter(i - 1)"
                         @mouseleave="handleMouseLeave(i - 1)"
-                        @contextmenu.prevent="handleRightClick(i - 1)"
+                        @contextmenu.prevent="handleRightClick($event, i - 1)"
                         :class="{
                             'cursor-grab': getItemAtIndex(i - 1) && !isDragging,
                             'cursor-grabbing': isDragging && dragSourceIndex === i - 1,
                             'drop-target': isDragging && i - 1 !== dragSourceIndex,
                         }"
                     >
-                        <!-- Hover Effect -->
                         <div
                             class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-purple-500/20 opacity-0 blur transition-all duration-300"
                             :class="{
@@ -31,7 +30,6 @@
                             }"
                         ></div>
 
-                        <!-- Slot Container -->
                         <div
                             class="relative h-full w-full rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-transparent p-2 transition-all duration-300"
                             :class="{
@@ -40,7 +38,6 @@
                                 'opacity-50': isDragging && i - 1 === dragSourceIndex,
                             }"
                         >
-                            <!-- Item Display -->
                             <div
                                 v-if="getItemAtIndex(i - 1)"
                                 class="relative h-full w-full overflow-hidden rounded-lg"
@@ -75,7 +72,6 @@
                                 </div>
                             </div>
 
-                            <!-- Empty Slot Display -->
                             <div v-else class="flex h-full w-full items-center justify-center">
                                 <div class="text-xs text-gray-600">{{ i }}</div>
                             </div>
@@ -85,7 +81,6 @@
             </div>
         </div>
 
-        <!-- Drag Preview -->
         <Teleport to="body">
             <div
                 v-if="isDragging && draggedItem"
@@ -124,13 +119,16 @@
                 </div>
             </div>
         </Teleport>
+
+        <SplitModal v-model="showSplitModal" :item="selectedItemForSplit" @split="handleSplitConfirm" />
     </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { InventoryConfig } from '../../shared/config';
 import { Item } from '@Shared/types/items';
+import SplitModal from './SplitModal.vue';
 
 const props = defineProps<{
     inventory: Array<Item | null>;
@@ -142,7 +140,7 @@ const emit = defineEmits<{
     (e: 'swap-items', fromIndex: number, toIndex: number): void;
     (e: 'stack-items', uidToStackOn: string, uidToStack: string): void;
     (e: 'update-positions', newArray: (Item | null)[]): void;
-    (e: 'split-item', item: Item): void;
+    (e: 'split-item', item: Item, quantity: number): void;
 }>();
 
 const isDragging = ref(false);
@@ -152,7 +150,9 @@ const cursorPos = ref({ x: 0, y: 0 });
 const mouseDownTimer = ref<number | null>(null);
 const mouseDownPos = ref({ x: 0, y: 0 });
 const currentHoverIndex = ref<number | null>(null);
-const DRAG_DELAY = 200; // ms to hold before dragging
+const showSplitModal = ref(false);
+const selectedItemForSplit = ref<Item | null>(null);
+const DRAG_DELAY = 200;
 
 const getItemAtIndex = (index: number): Item | null => {
     return props.inventory[index] || null;
@@ -175,8 +175,6 @@ const handleMouseDown = (event: MouseEvent, index: number) => {
     }
 
     mouseDownTimer.value = window.setTimeout(() => {
-        console.log('[DEBUG] Starting drag for item:', item.name);
-
         isDragging.value = true;
         draggedItem.value = item;
         dragSourceIndex.value = index;
@@ -200,53 +198,55 @@ const handleMouseUp = (event: MouseEvent, index: number) => {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance < 5 && item) {
-            console.log('[DEBUG] Selecting item:', item.name);
             emit('select-item', item);
         }
-    } else if (isDragging.value && dragSourceIndex.value !== null) {
-        if (currentHoverIndex.value !== null && index !== dragSourceIndex.value) {
-            const fromItem = getItemAtIndex(dragSourceIndex.value);
-            const toItem = getItemAtIndex(index);
+    } else if (isDragging.value && dragSourceIndex.value !== null && dragSourceIndex.value !== index) {
+        const fromItem = getItemAtIndex(dragSourceIndex.value);
+        const toItem = getItemAtIndex(index);
 
-            if (fromItem && toItem && fromItem.id === toItem.id) {
-                emit('stack-items', fromItem.uid, toItem.uid);
-            } else {
-                console.log('[DEBUG] Swapping items:', {
-                    from: dragSourceIndex.value,
-                    to: index,
-                    fromItem: getItemAtIndex(dragSourceIndex.value)?.name,
-                    toItem: getItemAtIndex(index)?.name,
-                });
-                emit('swap-items', dragSourceIndex.value, index);
+        if (fromItem && toItem && fromItem.id === toItem.id && fromItem.uid !== toItem.uid) {
+            const stackAvailable = toItem.maxStack - toItem.quantity;
+            if (stackAvailable > 0) {
+                emit('stack-items', toItem.uid, fromItem.uid);
             }
+        } else {
+            emit('swap-items', dragSourceIndex.value, index);
         }
     }
 
+    cleanupDragState();
+};
+
+const handleRightClick = (event: MouseEvent, index: number) => {
+    const item = getItemAtIndex(index);
+    if (item && item.quantity > 1) {
+        selectedItemForSplit.value = item;
+        showSplitModal.value = true;
+    }
+};
+
+const handleSplitConfirm = (item: Item, quantity: number) => {
+    if (quantity > 0 && quantity < item.quantity) {
+        console.log('[DEBUG] Confirming split:', { item: item.name, quantity });
+        emit('split-item', item, quantity);
+    }
+};
+
+const cleanupDragState = () => {
     isDragging.value = false;
     draggedItem.value = null;
     dragSourceIndex.value = null;
     currentHoverIndex.value = null;
-
     handleGlobalMouseUp();
 };
 
 const handleMouseEnter = (index: number) => {
     currentHoverIndex.value = index;
-    if (isDragging.value) {
-        console.log('[DEBUG] Hovering over slot:', index);
-    }
 };
 
 const handleMouseLeave = (index: number) => {
     if (currentHoverIndex.value === index) {
         currentHoverIndex.value = null;
-    }
-};
-
-const handleRightClick = (index: number) => {
-    const item = getItemAtIndex(index);
-    if (item) {
-        emit('split-item', item);
     }
 };
 
@@ -256,13 +256,9 @@ const handleContainerMouseMove = (event: MouseEvent) => {
     }
 };
 
-const handleContainerMouseLeave = (event: MouseEvent) => {
+const handleContainerMouseLeave = () => {
     if (isDragging.value) {
-        console.log('[DEBUG] Drag cancelled');
-        isDragging.value = false;
-        draggedItem.value = null;
-        dragSourceIndex.value = null;
-        currentHoverIndex.value = null;
+        cleanupDragState();
     }
 };
 
@@ -294,7 +290,6 @@ const handleGlobalMouseUp = () => {
 };
 
 onMounted(() => {
-    console.log('[DEBUG] InventoryGrid mounted');
     window.addEventListener('mousemove', handleGlobalMouseMove);
 });
 

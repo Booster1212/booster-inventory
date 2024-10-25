@@ -18,26 +18,141 @@ alt.onClient(InventoryEvents.Server.Inventory_UseItem, (player: alt.Player, item
     ItemManager.usePlayerItemManager(player).use(item.uid);
 });
 
+// Stack Items Function
 alt.onClient(
     InventoryEvents.Server.Inventory_StackItems,
     async (player: alt.Player, uidToStackOn: string, uidToStack: string) => {
-        alt.logWarning(`Trying to stack ${uidToStack} on ${uidToStackOn} ...`);
+        try {
+            const rebarDocument = Rebar.document.character.useCharacter(player);
+            let inventory = [...rebarDocument.get().items];
 
-        const playerItemManager = ItemManager.usePlayerItemManager(player);
-        const isStacked = await playerItemManager.stack(uidToStackOn, uidToStack);
+            console.log('Before stacking:', {
+                inventorySize: inventory.length,
+                items: inventory.map((i) => ({ uid: i.uid, quantity: i.quantity })),
+            });
 
-        if (isStacked) {
+            const targetItemIndex = inventory.findIndex((item) => item.uid === uidToStackOn);
+            const sourceItemIndex = inventory.findIndex((item) => item.uid === uidToStack);
+
+            if (targetItemIndex === -1 || sourceItemIndex === -1) {
+                console.log('Items not found:', { uidToStackOn, uidToStack });
+                return;
+            }
+
+            const targetItem = { ...inventory[targetItemIndex] };
+            const sourceItem = { ...inventory[sourceItemIndex] };
+
+            if (targetItem.id !== sourceItem.id) {
+                console.log('Items cannot be stacked - different types');
+                return;
+            }
+
+            const availableSpace = targetItem.maxStack - targetItem.quantity;
+            if (availableSpace <= 0) {
+                console.log('Target stack is full');
+                return;
+            }
+
+            const amountToStack = Math.min(availableSpace, sourceItem.quantity);
+
+            let newInventory = inventory.map((item) => ({ ...item }));
+
+            newInventory[targetItemIndex] = {
+                ...targetItem,
+                quantity: targetItem.quantity + amountToStack,
+            };
+
+            if (sourceItem.quantity - amountToStack <= 0) {
+                newInventory = newInventory.filter((_, index) => index !== sourceItemIndex);
+            } else {
+                newInventory[sourceItemIndex] = {
+                    ...sourceItem,
+                    quantity: sourceItem.quantity - amountToStack,
+                };
+            }
+
+            const oldTotal = inventory.reduce((sum, item) => sum + item.quantity, 0);
+            const newTotal = newInventory.reduce((sum, item) => sum + item.quantity, 0);
+
+            if (oldTotal !== newTotal) {
+                console.error('Quantity mismatch after stacking:', { oldTotal, newTotal });
+                return;
+            }
+
+            rebarDocument.set('items', newInventory);
             updateInventoryWebview(player);
+
+            console.log('After stacking:', {
+                inventorySize: newInventory.length,
+                items: newInventory.map((i) => ({ uid: i.uid, quantity: i.quantity })),
+            });
+        } catch (error) {
+            console.error('Stack items error:', error);
         }
     },
 );
 
+// Split Items Function
 alt.onClient(InventoryEvents.Server.Inventory_SplitItems, async (player: alt.Player, uid: string, quantity: number) => {
-    const playerItemManager = ItemManager.usePlayerItemManager(player);
-    const didSplit = await playerItemManager.split(uid, quantity);
+    try {
+        const rebarDocument = Rebar.document.character.useCharacter(player);
+        let inventory = [...rebarDocument.get().items];
 
-    if (didSplit) {
+        console.log('Before splitting:', {
+            inventorySize: inventory.length,
+            totalItems: inventory.reduce((sum, item) => sum + item.quantity, 0),
+        });
+
+        const sourceItemIndex = inventory.findIndex((item) => item.uid === uid);
+        if (sourceItemIndex === -1) {
+            console.log('Source item not found:', uid);
+            return;
+        }
+
+        const sourceItem = inventory[sourceItemIndex];
+
+        if (quantity <= 0 || quantity >= sourceItem.quantity) {
+            console.log('Invalid split quantity:', quantity);
+            return;
+        }
+
+        const newItem = {
+            ...sourceItem,
+            uid: `${sourceItem.uid}_split_${Date.now()}`,
+            quantity: quantity,
+        };
+
+        let newInventory = inventory.map((item) => ({ ...item }));
+
+        newInventory[sourceItemIndex] = {
+            ...sourceItem,
+            quantity: sourceItem.quantity - quantity,
+        };
+
+        newInventory.push(newItem);
+
+        const oldTotal = inventory.reduce((sum, item) => sum + item.quantity, 0);
+        const newTotal = newInventory.reduce((sum, item) => sum + item.quantity, 0);
+        const oldWeight = inventory.reduce((sum, item) => sum + item.weight * item.quantity, 0);
+        const newWeight = newInventory.reduce((sum, item) => sum + item.weight * item.quantity, 0);
+
+        if (oldTotal !== newTotal || oldWeight !== newWeight) {
+            console.error('Quantity/Weight mismatch after splitting:', {
+                quantities: { oldTotal, newTotal },
+                weights: { oldWeight, newWeight },
+            });
+            return;
+        }
+
+        rebarDocument.set('items', newInventory);
         updateInventoryWebview(player);
+
+        console.log('After splitting:', {
+            inventorySize: newInventory.length,
+            totalItems: newInventory.reduce((sum, item) => sum + item.quantity, 0),
+        });
+    } catch (error) {
+        console.error('Split items error:', error);
     }
 });
 
@@ -46,27 +161,25 @@ alt.on('inventory:useWeapon', async (player: alt.Player, item: Item) => {
         const rPlayer = Rebar.document.character.useCharacter(player);
         const playerData = rPlayer.get();
         const playerWeapons = playerData.weapons || [];
-
         const weaponHash = alt.hash(item.id);
-        const hasWeapon = playerWeapons.some((w) => w.hash === weaponHash);
 
-        if (hasWeapon) {
+        if (playerWeapons.some((w) => w.hash === weaponHash)) {
             await Rebar.player.useWeapon(player).clearWeapon(weaponHash);
-
-            const updatedWeapons = playerWeapons.filter((w) => w.hash !== weaponHash);
-            rPlayer.set('weapons', updatedWeapons);
-
+            rPlayer.set(
+                'weapons',
+                playerWeapons.filter((w) => w.hash !== weaponHash),
+            );
             await Rebar.usePlayer(player).animation.playFinite('reaction@intimidation@1h', 'outro', 47, 2000, false);
-
             return;
         }
 
+        // Clear existing weapons
         for (const weapon of playerWeapons) {
             await Rebar.player.useWeapon(player).clearWeapon(weapon.hash);
         }
 
+        // Add new weapon
         await Rebar.player.useWeapon(player).add(item.id, 50);
-
         rPlayer.set('weapons', [
             {
                 hash: weaponHash,
@@ -79,11 +192,9 @@ alt.on('inventory:useWeapon', async (player: alt.Player, item: Item) => {
         await Rebar.usePlayer(player).animation.playFinite('reaction@intimidation@1h', 'intro', 47, 2250, false);
         playRandomSound(player);
     } catch (error) {
-        const rPlayer = Rebar.document.character.useCharacter(player);
-
         console.error(`Error handling weapon ${item.id}:`, error);
-        const weaponHash = alt.hash(item.id);
-        await Rebar.player.useWeapon(player).clearWeapon(weaponHash);
+        const rPlayer = Rebar.document.character.useCharacter(player);
+        await Rebar.player.useWeapon(player).clearWeapon(alt.hash(item.id));
         rPlayer.set('weapons', []);
     }
 });
@@ -91,34 +202,13 @@ alt.on('inventory:useWeapon', async (player: alt.Player, item: Item) => {
 function playRandomSound(player: alt.Player) {
     const sounds = [
         'all_gonna_die_02.ogg',
-        'do_you_really_think_022.ogg',
         'dust_to_dust_018.ogg',
-        'forward_the_purification_015.ogg',
-        'fuck_you_01.ogg',
         'fucking_worthless_010.ogg',
-        'guardian_angel_011.ogg',
-        'killing_time_029.ogg',
-        'lambs_to_the_slaughter_09.ogg',
-        'lowest_common_denominator_024.ogg',
-        'man_of_hate_013.ogg',
-        'natural_death_012.ogg',
         'nightmare_06.ogg',
-        'no_more_useless_words_026.ogg',
         'pathetic_017.ogg',
-        'postal_quote_05.ogg',
-        'preys_destiny_016.ogg',
-        'quiet_028.ogg',
-        'sometimes_021.ogg',
-        'stfu_and_die_027.ogg',
         'suffer_and_die_07.ogg',
-        'thats_cute_025.ogg',
-        'thats_the_spirit_020.ogg',
-        'this_is_more_08.ogg',
         'time_to_die_030.ogg',
         'try_harder_023.ogg',
-        'who_cares_03.ogg',
-        'you_reek_of_weakness_019.ogg',
-        'your_family_04.ogg',
     ];
 
     const randomSound = sounds[Math.floor(Math.random() * sounds.length)];
@@ -126,16 +216,37 @@ function playRandomSound(player: alt.Player) {
 }
 
 export function updateInventoryWebview(player: alt.Player) {
-    const rebarDocument = Rebar.document.character.useCharacter(player).get();
-    const Webview = useWebview(player);
+    try {
+        const rebarDocument = Rebar.document.character.useCharacter(player).get();
+        const Webview = useWebview(player);
 
-    const inventoryWithEmptySlots = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
+        // Create a fresh array with proper null slots
+        const inventoryWithEmptySlots = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
 
-    rebarDocument.items.forEach((item, index) => {
-        if (index < inventoryWithEmptySlots.length) {
-            inventoryWithEmptySlots[index] = item;
-        }
-    });
+        // Deep clone items to ensure no reference issues
+        const items = rebarDocument.items.map((item) => ({ ...item }));
 
-    Webview.emit(InventoryEvents.Webview.Inventory_UpdateItems, inventoryWithEmptySlots);
+        // Fill in the items
+        items.forEach((item, index) => {
+            if (index < inventoryWithEmptySlots.length) {
+                inventoryWithEmptySlots[index] = item;
+            }
+        });
+
+        // Force toolbar update first
+        Webview.emit(InventoryEvents.Webview.Inventory_UpdateToolbar, inventoryWithEmptySlots);
+
+        // Then update main inventory
+        setTimeout(() => {
+            Webview.emit(InventoryEvents.Webview.Inventory_UpdateItems, inventoryWithEmptySlots);
+        }, 50);
+
+        // Log the update
+        console.log('[Inventory Update]', {
+            totalItems: items.length,
+            totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+        });
+    } catch (error) {
+        console.error('Error updating inventory webview:', error);
+    }
 }

@@ -15,7 +15,7 @@
                         @swap-items="handleSwapItems"
                         @stack-items="handleStackItems"
                         @update-positions="handleUpdatePositions"
-                        @split-item="splitItem"
+                        @split-item="handleSplitItem"
                         :toolbar-items="toolbarItems"
                     />
                 </div>
@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue';
 import { useEvents } from '@Composables/useEvents';
 import { InventoryEvents } from '../shared/events';
 import { Item } from '@Shared/types/items.js';
@@ -52,13 +52,11 @@ const events = useEvents();
 const TOOLBAR_STORAGE_KEY = 'inventory:toolbar';
 const INVENTORY_POSITIONS_KEY = 'inventory:positions';
 
-// State
 const inventory = ref<Item[]>([]);
 const itemPositions = ref<Record<string, number>>({});
 const selectedItem = ref<Item | null>(null);
 const toolbarItems = ref<(Item | null)[]>([null, null, null, null, null]);
 
-// Equipment slots configuration
 const equipmentSlots = ref<EquipmentSlot[]>([
     { id: 'head', name: 'Headwear', icon: '🎩', item: null },
     { id: 'face', name: 'Face', icon: '🕶️', item: null },
@@ -70,73 +68,91 @@ const equipmentSlots = ref<EquipmentSlot[]>([
     { id: 'accessory', name: 'Accessory', icon: '⌚', item: null },
 ]);
 
-// Computed
+const findFirstAvailableSlot = (slots: Array<Item | null>): number => {
+    return slots.findIndex((slot) => slot === null);
+};
+
+const fixItemPositions = (slots: Array<Item | null>) => {
+    const newPositions: Record<string, number> = {};
+    const seenItems = new Set<string>();
+
+    slots.forEach((item, index) => {
+        if (!item || seenItems.has(item.uid)) return;
+        newPositions[item.uid] = index;
+        seenItems.add(item.uid);
+    });
+
+    return newPositions;
+};
+
 const inventoryWithNulls = computed(() => {
     const result = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
+    const usedPositions = new Set<number>();
+
     inventory.value.forEach((item) => {
-        if (isValidItem(item)) {
-            const position = itemPositions.value[item.uid] ?? inventory.value.indexOf(item);
-            if (position !== -1 && position < result.length) {
-                result[position] = item;
-            }
+        if (!isValidItem(item)) return;
+
+        let position = itemPositions.value[item.uid];
+
+        if (position === undefined || position >= result.length || usedPositions.has(position)) {
+            position = findFirstAvailableSlot(result);
+        }
+
+        if (position !== -1 && !usedPositions.has(position)) {
+            result[position] = item;
+            usedPositions.add(position);
+            itemPositions.value[item.uid] = position;
         }
     });
+
+    itemPositions.value = fixItemPositions(result);
     return result;
 });
 
 const totalWeight = computed(() => {
-    return inventory.value
-        .reduce((acc, item) => {
-            if (isValidItem(item)) {
-                return acc + item.weight * item.quantity;
-            }
-            return acc;
-        }, 0)
-        .toFixed(1);
+    return inventory.value.reduce((acc, item) => acc + item.weight * item.quantity, 0).toFixed(1);
 });
 
-// Type Guards
 const isValidItem = (item: unknown): item is Item => {
     if (!item || typeof item !== 'object') return false;
     return ['uid', 'id', 'name', 'weight', 'quantity', 'maxStack', 'icon'].every((prop) => prop in (item as object));
 };
 
-// Storage Management
 const saveInventoryPositions = () => {
-    console.log('[DEBUG] Saving inventory positions');
-    const positions: Record<string, number> = {};
-    inventoryWithNulls.value.forEach((item, index) => {
-        if (isValidItem(item)) {
-            positions[item.uid] = index;
-        }
-    });
-    localStorage.setItem(INVENTORY_POSITIONS_KEY, JSON.stringify(positions));
+    localStorage.setItem(INVENTORY_POSITIONS_KEY, JSON.stringify(itemPositions.value));
 };
 
 const loadInventoryPositions = () => {
-    console.log('[DEBUG] Loading inventory positions');
-    const stored = localStorage.getItem(INVENTORY_POSITIONS_KEY);
-    if (stored) {
-        itemPositions.value = JSON.parse(stored);
+    try {
+        const stored = localStorage.getItem(INVENTORY_POSITIONS_KEY);
+        if (stored) {
+            itemPositions.value = JSON.parse(stored);
+        }
+    } catch (error) {
+        console.error('Error loading inventory positions:', error);
+        itemPositions.value = {};
     }
 };
 
-// Toolbar Management
 const saveToolbarToStorage = () => {
-    console.log('[DEBUG] Saving toolbar to storage');
     localStorage.setItem(TOOLBAR_STORAGE_KEY, JSON.stringify(toolbarItems.value));
 };
 
 const loadToolbarFromStorage = () => {
-    console.log('[DEBUG] Loading toolbar from storage');
-    const stored = localStorage.getItem(TOOLBAR_STORAGE_KEY);
-    if (stored) {
-        toolbarItems.value = JSON.parse(stored);
+    try {
+        const stored = localStorage.getItem(TOOLBAR_STORAGE_KEY);
+        if (stored) {
+            toolbarItems.value = JSON.parse(stored);
+        }
+    } catch (error) {
+        console.error('Error loading toolbar:', error);
+        toolbarItems.value = [null, null, null, null, null];
     }
 };
 
 const assignToHotkey = (item: Item, slot: number) => {
-    console.log('[DEBUG] Assigning item to hotkey:', { item: item.name, slot });
+    if (!isValidItem(item)) return;
+
     const existingSlot = toolbarItems.value.findIndex((i) => i?.uid === item.uid);
     if (existingSlot !== -1) {
         toolbarItems.value[existingSlot] = null;
@@ -146,132 +162,106 @@ const assignToHotkey = (item: Item, slot: number) => {
 };
 
 const removeFromHotkey = (slot: number) => {
-    console.log('[DEBUG] Removing item from hotkey:', slot);
     toolbarItems.value[slot] = null;
     saveToolbarToStorage();
 };
 
-// Item Actions
 const selectItem = (item: Item) => {
-    if (isValidItem(item)) {
-        selectedItem.value = item;
-        console.log('[DEBUG] Selected item:', item.name);
-    }
+    if (!isValidItem(item)) return;
+    selectedItem.value = item;
 };
 
 const useItem = (item: Item) => {
-    if (isValidItem(item)) {
-        console.log('[DEBUG] Using item:', item.name);
-        events.emitServer(InventoryEvents.Server.Inventory_UseItem, item);
-    }
+    if (!isValidItem(item)) return;
+    events.emitServer(InventoryEvents.Server.Inventory_UseItem, item);
 };
 
 const dropItem = (item: Item) => {
-    console.log('[DEBUG] Dropping item:', item.name);
     // Implement drop logic here
 };
 
 const handleSwapItems = (fromIndex: number, toIndex: number) => {
-    console.log('[DEBUG] Swapping items:', { from: fromIndex, to: toIndex });
     if (fromIndex === toIndex) return;
 
     const fromItem = inventoryWithNulls.value[fromIndex];
     const toItem = inventoryWithNulls.value[toIndex];
 
-    if (fromItem && toItem && fromItem.id === toItem.id) {
-        events.emitServer(InventoryEvents.Server.Inventory_StackItems, fromItem.uid, toItem.uid);
-    } else {
-        const newArray = [...inventoryWithNulls.value];
-        [newArray[fromIndex], newArray[toIndex]] = [newArray[toIndex], newArray[fromIndex]];
-
-        inventory.value = newArray.filter(isValidItem);
-        handleUpdatePositions(newArray);
+    if (fromItem && toItem && fromItem.id === toItem.id && fromItem.uid !== toItem.uid) {
+        handleStackItems(toItem.uid, fromItem.uid);
+        return;
     }
+
+    const newPositions = { ...itemPositions.value };
+
+    if (fromItem) newPositions[fromItem.uid] = toIndex;
+    if (toItem) newPositions[toItem.uid] = fromIndex;
+
+    itemPositions.value = newPositions;
+    saveInventoryPositions();
 };
 
 const handleStackItems = (uidToStackOn: string, uidToStack: string) => {
-    console.log('[DEBUG] Stacking items:', { uidToStackOn, uidToStack });
+    if (uidToStackOn === uidToStack) return;
     events.emitServer(InventoryEvents.Server.Inventory_StackItems, uidToStackOn, uidToStack);
 };
 
 const handleUpdatePositions = (newArray: (Item | null)[]) => {
-    console.log('[DEBUG] Updating item positions');
-    itemPositions.value = {};
-    newArray.forEach((item, index) => {
-        if (isValidItem(item)) {
-            itemPositions.value[item.uid] = index;
-        }
-    });
+    itemPositions.value = fixItemPositions(newArray);
     saveInventoryPositions();
 };
 
-const splitItem = (item: Item) => {
-    console.log('[DEBUG] Splitting item:', item.name);
-    events.emitServer(InventoryEvents.Server.Inventory_SplitItems, item.uid, 1);
+const handleSplitItem = (item: Item, quantity: number) => {
+    if (!isValidItem(item) || quantity >= item.quantity || quantity <= 0) return;
+    events.emitServer(InventoryEvents.Server.Inventory_SplitItems, item.uid, quantity);
 };
 
-// Watchers
-watch(
-    toolbarItems,
-    () => {
-        console.log('[DEBUG] Toolbar items changed, saving...');
-        saveToolbarToStorage();
-    },
-    { deep: true },
-);
+const setupEventHandlers = () => {
+    const handleInventoryUpdate = (itemsFromServer: Array<Item>) => {
+        if (!Array.isArray(itemsFromServer)) return;
 
-watch(
-    inventory,
-    (newInventory) => {
-        console.log('[DEBUG] Inventory changed, updating toolbar items...');
+        inventory.value = itemsFromServer;
+
         toolbarItems.value = toolbarItems.value.map((toolbarItem) => {
             if (!toolbarItem) return null;
-            const matchingItem = newInventory.find((item) => isValidItem(item) && item.uid === toolbarItem.uid);
-            return matchingItem || null;
+            return itemsFromServer.find((item) => item.uid === toolbarItem.uid) || null;
         });
-    },
-    { deep: true },
-);
 
-// Lifecycle
+        itemPositions.value = fixItemPositions(inventoryWithNulls.value);
+        saveInventoryPositions();
+    };
+
+    events.on(InventoryEvents.Webview.Inventory_UpdateItems, handleInventoryUpdate);
+};
+
 onMounted(async () => {
-    console.log('[DEBUG] Inventory component mounted');
-
     loadToolbarFromStorage();
     loadInventoryPositions();
 
     try {
         const result = await events.emitServerRpc(InventoryEvents.Server.Inventory_RequestItems);
-        console.log('[DEBUG] Received inventory items from server:', result);
-
         if (Array.isArray(result)) {
             inventory.value = result;
 
-            // Update itemPositions based on the received items
-            itemPositions.value = {};
             result.forEach((item, index) => {
-                if (isValidItem(item)) {
+                if (isValidItem(item) && !(item.uid in itemPositions.value)) {
                     itemPositions.value[item.uid] = index;
                 }
             });
 
             toolbarItems.value = toolbarItems.value.map((toolbarItem) =>
-                toolbarItem ? { ...(inventory.value.find((item) => item?.uid === toolbarItem.uid) || null) } : null,
+                toolbarItem ? inventory.value.find((item) => item?.uid === toolbarItem.uid) || null : null,
             );
 
-            saveToolbarToStorage();
+            itemPositions.value = fixItemPositions(inventoryWithNulls.value);
+            saveInventoryPositions();
         }
     } catch (error) {
-        console.error('[DEBUG] Error loading inventory:', error);
+        console.error('Error loading inventory:', error);
     }
-
-    events.on(InventoryEvents.Webview.Inventory_UpdateItems, (itemsFromServer: Array<Item>) => {
-        console.log('[DEBUG] Received inventory update from server');
-        if (Array.isArray(itemsFromServer)) {
-            inventory.value = itemsFromServer;
-        }
-    });
 });
+
+const cleanup = setupEventHandlers();
+onBeforeUnmount(cleanup);
 </script>
 
 <style scoped>
