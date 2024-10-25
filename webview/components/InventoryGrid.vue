@@ -15,6 +15,7 @@
                         @mouseup="handleMouseUp($event, i - 1)"
                         @mouseenter="handleMouseEnter(i - 1)"
                         @mouseleave="handleMouseLeave(i - 1)"
+                        @contextmenu.prevent="handleRightClick(i - 1)"
                         :class="{
                             'cursor-grab': getItemAtIndex(i - 1) && !isDragging,
                             'cursor-grabbing': isDragging && dragSourceIndex === i - 1,
@@ -139,7 +140,9 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'select-item', item: Item): void;
     (e: 'swap-items', fromIndex: number, toIndex: number): void;
-    (e: 'drag-to-toolbar', item: Item): void;
+    (e: 'stack-items', uidToStackOn: string, uidToStack: string): void;
+    (e: 'update-positions', newArray: (Item | null)[]): void;
+    (e: 'split-item', item: Item): void;
 }>();
 
 const isDragging = ref(false);
@@ -149,7 +152,7 @@ const cursorPos = ref({ x: 0, y: 0 });
 const mouseDownTimer = ref<number | null>(null);
 const mouseDownPos = ref({ x: 0, y: 0 });
 const currentHoverIndex = ref<number | null>(null);
-const DRAG_DELAY = 100; // ms to hold before dragging
+const DRAG_DELAY = 200; // ms to hold before dragging
 
 const getItemAtIndex = (index: number): Item | null => {
     return props.inventory[index] || null;
@@ -159,19 +162,6 @@ const getHotkeyNumber = (item: Item | null): number | null => {
     if (!item) return null;
     const index = props.toolbarItems.findIndex((i) => i?.uid === item.uid);
     return index !== -1 ? index + 1 : null;
-};
-
-const isOverToolbar = (event: MouseEvent): boolean => {
-    const toolbarElement = document.querySelector('.toolbar-container');
-    if (!toolbarElement) return false;
-
-    const rect = toolbarElement.getBoundingClientRect();
-    return (
-        event.clientX >= rect.left &&
-        event.clientX <= rect.right &&
-        event.clientY >= rect.top &&
-        event.clientY <= rect.bottom
-    );
 };
 
 const handleMouseDown = (event: MouseEvent, index: number) => {
@@ -214,17 +204,21 @@ const handleMouseUp = (event: MouseEvent, index: number) => {
             emit('select-item', item);
         }
     } else if (isDragging.value && dragSourceIndex.value !== null) {
-        if (isOverToolbar(event) && draggedItem.value) {
-            console.log('[DEBUG] Dropping item on toolbar:', draggedItem.value.name);
-            emit('drag-to-toolbar', draggedItem.value);
-        } else if (index !== dragSourceIndex.value) {
-            console.log('[DEBUG] Swapping items:', {
-                from: dragSourceIndex.value,
-                to: index,
-                fromItem: getItemAtIndex(dragSourceIndex.value)?.name,
-                toItem: getItemAtIndex(index)?.name,
-            });
-            emit('swap-items', dragSourceIndex.value, index);
+        if (currentHoverIndex.value !== null && index !== dragSourceIndex.value) {
+            const fromItem = getItemAtIndex(dragSourceIndex.value);
+            const toItem = getItemAtIndex(index);
+
+            if (fromItem && toItem && fromItem.id === toItem.id) {
+                emit('stack-items', fromItem.uid, toItem.uid);
+            } else {
+                console.log('[DEBUG] Swapping items:', {
+                    from: dragSourceIndex.value,
+                    to: index,
+                    fromItem: getItemAtIndex(dragSourceIndex.value)?.name,
+                    toItem: getItemAtIndex(index)?.name,
+                });
+                emit('swap-items', dragSourceIndex.value, index);
+            }
         }
     }
 
@@ -249,6 +243,13 @@ const handleMouseLeave = (index: number) => {
     }
 };
 
+const handleRightClick = (index: number) => {
+    const item = getItemAtIndex(index);
+    if (item) {
+        emit('split-item', item);
+    }
+};
+
 const handleContainerMouseMove = (event: MouseEvent) => {
     if (isDragging.value) {
         cursorPos.value = { x: event.clientX, y: event.clientY };
@@ -256,8 +257,12 @@ const handleContainerMouseMove = (event: MouseEvent) => {
 };
 
 const handleContainerMouseLeave = (event: MouseEvent) => {
-    if (isDragging.value && draggedItem.value && isOverToolbar(event)) {
-        console.log('[DEBUG] Dragging over toolbar:', draggedItem.value.name);
+    if (isDragging.value) {
+        console.log('[DEBUG] Drag cancelled');
+        isDragging.value = false;
+        draggedItem.value = null;
+        dragSourceIndex.value = null;
+        currentHoverIndex.value = null;
     }
 };
 

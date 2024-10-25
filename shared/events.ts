@@ -3,6 +3,8 @@ export const InventoryEvents = {
     Server: {
         Inventory_UseItem: 'inventory:use-item',
         Inventory_RequestItems: 'inventory:request-items',
+        Inventory_StackItems: 'inventory:stack-items',
+        Inventory_SplitItems: 'inventory:split-items',
     },
     RPC: {},
     Webview: {

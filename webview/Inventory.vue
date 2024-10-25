@@ -13,6 +13,9 @@
                         :inventory="inventoryWithNulls"
                         @select-item="selectItem"
                         @swap-items="handleSwapItems"
+                        @stack-items="handleStackItems"
+                        @update-positions="handleUpdatePositions"
+                        @split-item="splitItem"
                         :toolbar-items="toolbarItems"
                     />
                 </div>
@@ -52,7 +55,6 @@ const INVENTORY_POSITIONS_KEY = 'inventory:positions';
 // State
 const inventory = ref<Item[]>([]);
 const itemPositions = ref<Record<string, number>>({});
-const positionsLoaded = ref(false);
 const selectedItem = ref<Item | null>(null);
 const toolbarItems = ref<(Item | null)[]>([null, null, null, null, null]);
 
@@ -71,10 +73,10 @@ const equipmentSlots = ref<EquipmentSlot[]>([
 // Computed
 const inventoryWithNulls = computed(() => {
     const result = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
-    inventory.value.forEach((item, index) => {
+    inventory.value.forEach((item) => {
         if (isValidItem(item)) {
-            const position = itemPositions.value[item.uid] ?? index;
-            if (position < result.length) {
+            const position = itemPositions.value[item.uid] ?? inventory.value.indexOf(item);
+            if (position !== -1 && position < result.length) {
                 result[position] = item;
             }
         }
@@ -106,60 +108,31 @@ const saveInventoryPositions = () => {
     inventoryWithNulls.value.forEach((item, index) => {
         if (isValidItem(item)) {
             positions[item.uid] = index;
-            console.log(`[DEBUG] Saving position for ${item.name}: ${index}`);
         }
     });
-
-    try {
-        localStorage.setItem(INVENTORY_POSITIONS_KEY, JSON.stringify(positions));
-        itemPositions.value = positions;
-        console.log('[DEBUG] Saved positions:', positions);
-    } catch (error) {
-        console.error('[DEBUG] Error saving positions:', error);
-    }
+    localStorage.setItem(INVENTORY_POSITIONS_KEY, JSON.stringify(positions));
 };
 
 const loadInventoryPositions = () => {
     console.log('[DEBUG] Loading inventory positions');
-    try {
-        const stored = localStorage.getItem(INVENTORY_POSITIONS_KEY);
-        if (stored) {
-            itemPositions.value = JSON.parse(stored);
-            positionsLoaded.value = true;
-            console.log('[DEBUG] Loaded positions:', itemPositions.value);
-            return true;
-        }
-    } catch (error) {
-        console.error('[DEBUG] Error loading positions:', error);
-        itemPositions.value = {};
+    const stored = localStorage.getItem(INVENTORY_POSITIONS_KEY);
+    if (stored) {
+        itemPositions.value = JSON.parse(stored);
     }
-    return false;
 };
 
 // Toolbar Management
 const saveToolbarToStorage = () => {
     console.log('[DEBUG] Saving toolbar to storage');
-    try {
-        localStorage.setItem(TOOLBAR_STORAGE_KEY, JSON.stringify(toolbarItems.value));
-        console.log('[DEBUG] Toolbar saved successfully');
-    } catch (error) {
-        console.error('[DEBUG] Error saving toolbar:', error);
-    }
+    localStorage.setItem(TOOLBAR_STORAGE_KEY, JSON.stringify(toolbarItems.value));
 };
 
 const loadToolbarFromStorage = () => {
     console.log('[DEBUG] Loading toolbar from storage');
-    try {
-        const stored = localStorage.getItem(TOOLBAR_STORAGE_KEY);
-        if (stored) {
-            toolbarItems.value = JSON.parse(stored);
-            console.log('[DEBUG] Successfully loaded toolbar');
-            return true;
-        }
-    } catch (error) {
-        console.error('[DEBUG] Error loading toolbar:', error);
+    const stored = localStorage.getItem(TOOLBAR_STORAGE_KEY);
+    if (stored) {
+        toolbarItems.value = JSON.parse(stored);
     }
-    return false;
 };
 
 const assignToHotkey = (item: Item, slot: number) => {
@@ -195,32 +168,46 @@ const useItem = (item: Item) => {
 
 const dropItem = (item: Item) => {
     console.log('[DEBUG] Dropping item:', item.name);
-    // TODO: Implement drop logic here
+    // Implement drop logic here
 };
 
 const handleSwapItems = (fromIndex: number, toIndex: number) => {
     console.log('[DEBUG] Swapping items:', { from: fromIndex, to: toIndex });
     if (fromIndex === toIndex) return;
 
-    const newArray = [...inventoryWithNulls.value];
-    [newArray[fromIndex], newArray[toIndex]] = [newArray[toIndex], newArray[fromIndex]];
+    const fromItem = inventoryWithNulls.value[fromIndex];
+    const toItem = inventoryWithNulls.value[toIndex];
 
-    inventory.value = newArray.filter(isValidItem);
+    if (fromItem && toItem && fromItem.id === toItem.id) {
+        events.emitServer(InventoryEvents.Server.Inventory_StackItems, fromItem.uid, toItem.uid);
+    } else {
+        const newArray = [...inventoryWithNulls.value];
+        [newArray[fromIndex], newArray[toIndex]] = [newArray[toIndex], newArray[fromIndex]];
 
-    const newPositions: Record<string, number> = {};
+        inventory.value = newArray.filter(isValidItem);
+        handleUpdatePositions(newArray);
+    }
+};
+
+const handleStackItems = (uidToStackOn: string, uidToStack: string) => {
+    console.log('[DEBUG] Stacking items:', { uidToStackOn, uidToStack });
+    events.emitServer(InventoryEvents.Server.Inventory_StackItems, uidToStackOn, uidToStack);
+};
+
+const handleUpdatePositions = (newArray: (Item | null)[]) => {
+    console.log('[DEBUG] Updating item positions');
+    itemPositions.value = {};
     newArray.forEach((item, index) => {
         if (isValidItem(item)) {
-            newPositions[item.uid] = index;
+            itemPositions.value[item.uid] = index;
         }
     });
-
-    itemPositions.value = newPositions;
     saveInventoryPositions();
+};
 
-    console.log(
-        '[DEBUG] New inventory arrangement:',
-        inventory.value.map((item) => `${item.name}: ${itemPositions.value[item.uid]}`),
-    );
+const splitItem = (item: Item) => {
+    console.log('[DEBUG] Splitting item:', item.name);
+    events.emitServer(InventoryEvents.Server.Inventory_SplitItems, item.uid, 1);
 };
 
 // Watchers
@@ -259,6 +246,14 @@ onMounted(async () => {
 
         if (Array.isArray(result)) {
             inventory.value = result;
+
+            // Update itemPositions based on the received items
+            itemPositions.value = {};
+            result.forEach((item, index) => {
+                if (isValidItem(item)) {
+                    itemPositions.value[item.uid] = index;
+                }
+            });
 
             toolbarItems.value = toolbarItems.value.map((toolbarItem) =>
                 toolbarItem ? { ...(inventory.value.find((item) => item?.uid === toolbarItem.uid) || null) } : null,
