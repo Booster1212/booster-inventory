@@ -18,7 +18,6 @@ alt.onClient(InventoryEvents.Server.Inventory_UseItem, (player: alt.Player, item
     ItemManager.usePlayerItemManager(player).use(item.uid);
 });
 
-// Stack Items Function
 alt.onClient(
     InventoryEvents.Server.Inventory_StackItems,
     async (player: alt.Player, uidToStackOn: string, uidToStack: string) => {
@@ -92,7 +91,6 @@ alt.onClient(
     },
 );
 
-// Split Items Function
 alt.onClient(InventoryEvents.Server.Inventory_SplitItems, async (player: alt.Player, uid: string, quantity: number) => {
     try {
         const rebarDocument = Rebar.document.character.useCharacter(player);
@@ -173,12 +171,10 @@ alt.on('inventory:useWeapon', async (player: alt.Player, item: Item) => {
             return;
         }
 
-        // Clear existing weapons
         for (const weapon of playerWeapons) {
             await Rebar.player.useWeapon(player).clearWeapon(weapon.hash);
         }
 
-        // Add new weapon
         await Rebar.player.useWeapon(player).add(item.id, 50);
         rPlayer.set('weapons', [
             {
@@ -220,28 +216,22 @@ export function updateInventoryWebview(player: alt.Player) {
         const rebarDocument = Rebar.document.character.useCharacter(player).get();
         const Webview = useWebview(player);
 
-        // Create a fresh array with proper null slots
         const inventoryWithEmptySlots = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
 
-        // Deep clone items to ensure no reference issues
         const items = rebarDocument.items.map((item) => ({ ...item }));
 
-        // Fill in the items
         items.forEach((item, index) => {
             if (index < inventoryWithEmptySlots.length) {
                 inventoryWithEmptySlots[index] = item;
             }
         });
 
-        // Force toolbar update first
         Webview.emit(InventoryEvents.Webview.Inventory_UpdateToolbar, inventoryWithEmptySlots);
 
-        // Then update main inventory
         setTimeout(() => {
             Webview.emit(InventoryEvents.Webview.Inventory_UpdateItems, inventoryWithEmptySlots);
         }, 50);
 
-        // Log the update
         console.log('[Inventory Update]', {
             totalItems: items.length,
             totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
