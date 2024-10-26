@@ -17,18 +17,6 @@ declare module 'alt-server' {
 }
 
 export const weapons: Array<Item> = [
-    {
-        name: 'Burger',
-        desc: 'A tasty burger to satisfy hunger.',
-        id: 'burger',
-        icon: '../../../images/Burger.png',
-        maxStack: 10,
-        quantity: 1,
-        uid: 'inventory_burger',
-        weight: 1,
-        useEventName: 'inventory:useFood',
-        data: {},
-    },
     // Assault Rifles
     {
         name: 'Advanced Rifle',
