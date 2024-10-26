@@ -17,7 +17,7 @@
                                 <div class="flex items-baseline gap-1 text-sm font-medium">
                                     <span class="text-white">{{ totalWeight }}</span>
                                     <span class="text-gray-600">/</span>
-                                    <span class="text-gray-500">{{ maxWeight.toFixed(1) }}</span>
+                                    <span class="text-gray-500">{{ maxWeight }}</span>
                                 </div>
                             </div>
                             <div class="h-8 w-24 overflow-hidden rounded-md border border-white/5 bg-white/5">
@@ -114,9 +114,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { Item } from '@Shared/types/items';
-import { useWeightManagement } from '../composable/useWeightManagement';
+import { InventoryConfig } from '../../shared/config';
 import { useToolbar } from '../composable/useToolbar';
 import { useItemValidation } from '../composable/useItemValidation';
 import { useEvents } from '@Composables/useEvents';
@@ -135,12 +135,12 @@ const emit = defineEmits<{
 const events = useEvents();
 const activeDropSlot = ref<number | null>(null);
 
-const { weightPercentage, isOverweight, formattedTotalWeight, maxWeight } = useWeightManagement(
-    ref(props.toolbarItems.filter((item): item is Item => item !== null)),
-);
+const currentWeight = computed(() => parseFloat(props.totalWeight));
+const maxWeight = computed(() => InventoryConfig.itemManager.weight.maxWeight);
+const isOverweight = computed(() => currentWeight.value > maxWeight.value);
+const weightPercentage = computed(() => Math.min((currentWeight.value / maxWeight.value) * 100, 100));
 
 const { assignToHotkey, removeFromHotkey } = useToolbar();
-
 const { isValidItem } = useItemValidation();
 
 const showItemQuantity = (item: Item | null): boolean => {
