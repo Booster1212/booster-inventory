@@ -1,14 +1,16 @@
 import * as alt from 'alt-server';
 import { useRebar } from '@Server/index.js';
 import { useApi } from '@Server/api/index.js';
-import { Item } from '@Shared/types/items.js';
+import { Item, RebarItems } from '@Shared/types/items.js';
 import { InventoryConfig } from '../../shared/config.js';
 import { InventoryEvents } from '../../shared/events.js';
 import { useWebview } from '@Server/player/webview.js';
 
 const Rebar = useRebar();
 
-export function useInventoryAPI() {
+async function initializeInventoryAPI() {
+    const ItemManager = await useApi().getAsync('item-manager-api');
+
     function getTotalWeight(items: Item[]): number {
         return items.reduce((acc, item) => acc + item.weight * item.quantity, 0);
     }
@@ -21,50 +23,62 @@ export function useInventoryAPI() {
         return newWeight <= InventoryConfig.itemManager.weight.maxWeight;
     }
 
-    function hasItem(player: alt.Player, itemId: string): boolean {
+    function hasItem(player: alt.Player, itemName: string): boolean {
         const rebarDocument = Rebar.document.character.useCharacter(player).get();
-        return rebarDocument.items?.some((item) => item.id === itemId) || false;
+        return rebarDocument.items?.some((item) => item.name === itemName) || false;
     }
 
-    function getItemCount(player: alt.Player, itemId: string): number {
+    function getItemCount(player: alt.Player, itemName: string): number {
         const rebarDocument = Rebar.document.character.useCharacter(player).get();
         const items = rebarDocument.items || [];
         return items.reduce((count, item) => {
-            if (item.id === itemId) {
+            if (item.name === itemName) {
                 return count + item.quantity;
             }
             return count;
         }, 0);
     }
 
-    async function addItem(player: alt.Player, item: Item): Promise<boolean> {
+    async function addItem(player: alt.Player, itemName: keyof RebarItems, quantity: number = 1): Promise<boolean> {
         try {
-            if (!canAddItem(player, item)) {
+            const itemDefinition = ItemManager.useItemManager().getBaseItem(itemName);
+            if (!itemDefinition) {
+                console.error(`Item ${itemName} not found in ItemManager`);
+                return false;
+            }
+
+            const itemToAdd = {
+                ...itemDefinition,
+                quantity,
+                uid: `${itemDefinition.id}_${Date.now()}`,
+            };
+            if (!canAddItem(player, itemToAdd)) {
                 return false;
             }
 
             const rebarDocument = Rebar.document.character.useCharacter(player);
             const currentItems = [...(rebarDocument.get().items || [])];
 
-            const existingItem = currentItems.find((i) => i.id === item.id && i.quantity < i.maxStack);
+            const existingItem = currentItems.find((i) => i.id === itemDefinition.id && i.quantity < i.maxStack);
             if (existingItem) {
                 const spaceInStack = existingItem.maxStack - existingItem.quantity;
-                const amountToAdd = Math.min(item.quantity, spaceInStack);
+                const amountToAdd = Math.min(quantity, spaceInStack);
 
                 existingItem.quantity += amountToAdd;
 
-                if (amountToAdd < item.quantity) {
+                if (amountToAdd < quantity) {
                     const newItem = {
-                        ...item,
-                        quantity: item.quantity - amountToAdd,
-                        uid: `${item.id}_${Date.now()}`,
+                        ...itemDefinition,
+                        quantity: quantity - amountToAdd,
+                        uid: `${itemDefinition.id}_${Date.now()}`,
                     };
                     currentItems.push(newItem);
                 }
             } else {
                 const newItem = {
-                    ...item,
-                    uid: `${item.id}_${Date.now()}`,
+                    ...itemDefinition,
+                    quantity,
+                    uid: `${itemDefinition.id}_${Date.now()}`,
                 };
                 currentItems.push(newItem);
             }
@@ -78,14 +92,14 @@ export function useInventoryAPI() {
         }
     }
 
-    async function removeItem(player: alt.Player, itemId: string, quantity: number = 1): Promise<boolean> {
+    async function removeItem(player: alt.Player, itemName: string, quantity: number = 1): Promise<boolean> {
         try {
             const rebarDocument = Rebar.document.character.useCharacter(player);
             let currentItems = [...(rebarDocument.get().items || [])];
             let remainingToRemove = quantity;
 
             currentItems = currentItems.reduce((acc: Item[], item) => {
-                if (item.id !== itemId || remainingToRemove <= 0) {
+                if (item.name !== itemName || remainingToRemove <= 0) {
                     acc.push(item);
                     return acc;
                 }
@@ -122,7 +136,7 @@ export function useInventoryAPI() {
             const Webview = useWebview(player);
 
             const inventoryWithEmptySlots = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
-            const items = rebarDocument.items.map((item) => ({ ...item }));
+            const items = rebarDocument.items?.map((item) => ({ ...item })) || [];
 
             items.forEach((item, index) => {
                 if (index < inventoryWithEmptySlots.length) {
@@ -136,7 +150,7 @@ export function useInventoryAPI() {
         }
     }
 
-    return {
+    const inventoryAPI = {
         addItem,
         removeItem,
         hasItem,
@@ -145,13 +159,22 @@ export function useInventoryAPI() {
         getTotalWeight,
         updateInventoryWebview,
     };
+
+    useApi().register('inventory-api', inventoryAPI);
 }
 
-// Register the API
+initializeInventoryAPI();
+
 declare global {
     export interface ServerPlugin {
-        ['inventory-api']: ReturnType<typeof useInventoryAPI>;
+        ['inventory-api']: {
+            addItem: (player: alt.Player, itemName: string, quantity: number) => Promise<boolean>;
+            removeItem: (player: alt.Player, itemName: string, quantity: number) => Promise<boolean>;
+            hasItem: (player: alt.Player, itemName: string) => boolean;
+            getItemCount: (player: alt.Player, itemName: string) => number;
+            canAddItem: (player: alt.Player, item: Item) => boolean;
+            getTotalWeight: (items: Item[]) => number;
+            updateInventoryWebview: (player: alt.Player) => void;
+        };
     }
 }
-
-useApi().register('inventory-api', useInventoryAPI());
