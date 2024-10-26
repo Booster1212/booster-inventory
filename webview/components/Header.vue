@@ -17,9 +17,7 @@
                                 <div class="flex items-baseline gap-1 text-sm font-medium">
                                     <span class="text-white">{{ totalWeight }}</span>
                                     <span class="text-gray-600">/</span>
-                                    <span class="text-gray-500">{{
-                                        InventoryConfig.itemManager.weight.maxWeight.toFixed(1)
-                                    }}</span>
+                                    <span class="text-gray-500">{{ maxWeight.toFixed(1) }}</span>
                                 </div>
                             </div>
                             <div class="h-8 w-24 overflow-hidden rounded-md border border-white/5 bg-white/5">
@@ -29,7 +27,7 @@
                                         'from-blue-500/20 to-purple-500/20': !isOverweight,
                                         'from-red-500/20 to-red-400/20': isOverweight,
                                     }"
-                                    :style="{ width: `${getWeightPercentage}%` }"
+                                    :style="{ width: `${weightPercentage}%` }"
                                 ></div>
                             </div>
                         </div>
@@ -44,22 +42,21 @@
                         <kbd class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-gray-400">1-5</kbd>
                         <span class="ml-2">to use items</span>
                     </div>
-                    <div v-if="isOverweight" class="text-xs text-red-400">Carrying too much weight</div>
+                    <div v-if="isOverweight" class="text-xs text-red-400">Weight overweight</div>
                 </div>
 
                 <div class="flex items-center gap-2">
                     <div class="text-xs text-gray-500">Quick Access</div>
                     <div class="toolbar-container flex items-end justify-center space-x-2">
-                        <!-- Toolbar Slots -->
                         <div
                             v-for="(item, index) in toolbarItems"
                             :key="index"
                             class="group relative"
-                            @contextmenu.prevent="removeFromHotkey(index)"
+                            @contextmenu.prevent="() => handleRemoveHotkey(index)"
                             @dragover.prevent
-                            @drop.prevent="handleDrop($event, index)"
-                            @dragenter.prevent="handleDragEnter(index)"
-                            @dragleave.prevent="handleDragLeave(index)"
+                            @drop.prevent="(e) => handleDrop(e, index)"
+                            @dragenter.prevent="() => handleDragEnter(index)"
+                            @dragleave.prevent="() => handleDragLeave(index)"
                         >
                             <div class="absolute -top-6 left-1/2 -translate-x-1/2 text-sm text-blue-400/80">
                                 {{ index + 1 }}
@@ -99,7 +96,7 @@
                                                 </div>
                                             </div>
                                             <div
-                                                v-if="item.quantity > 1"
+                                                v-if="showItemQuantity(item)"
                                                 class="absolute right-1 top-1 rounded bg-black/80 px-1.5 py-0.5 text-xs font-medium text-gray-300 backdrop-blur-sm"
                                             >
                                                 {{ item.quantity }}x
@@ -117,13 +114,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { InventoryConfig } from '../../shared/config';
+import { ref } from 'vue';
 import { Item } from '@Shared/types/items';
+import { useWeightManagement } from '../composable/useWeightManagement';
+import { useToolbar } from '../composable/useToolbar';
+import { useItemValidation } from '../composable/useItemValidation';
+import { useEvents } from '@Composables/useEvents';
 
 const props = defineProps<{
     totalWeight: string;
-    toolbarItems: (Item | null)[];
+    toolbarItems: Array<Item | null>;
 }>();
 
 const emit = defineEmits<{
@@ -132,15 +132,20 @@ const emit = defineEmits<{
     (e: 'assign-hotkey', item: Item, slot: number): void;
 }>();
 
+const events = useEvents();
 const activeDropSlot = ref<number | null>(null);
 
-const getWeightPercentage = computed(() => {
-    return Math.min((parseFloat(props.totalWeight) / InventoryConfig.itemManager.weight.maxWeight) * 100, 100);
-});
+const { weightPercentage, isOverweight, formattedTotalWeight, maxWeight } = useWeightManagement(
+    ref(props.toolbarItems.filter((item): item is Item => item !== null)),
+);
 
-const isOverweight = computed(() => {
-    return parseFloat(props.totalWeight) > InventoryConfig.itemManager.weight.maxWeight;
-});
+const { assignToHotkey, removeFromHotkey } = useToolbar();
+
+const { isValidItem } = useItemValidation();
+
+const showItemQuantity = (item: Item | null): boolean => {
+    return Boolean(item && item.quantity > 1);
+};
 
 const handleDrop = async (event: DragEvent, index: number) => {
     event.preventDefault();
@@ -148,32 +153,32 @@ const handleDrop = async (event: DragEvent, index: number) => {
     if (itemData) {
         try {
             const item = JSON.parse(itemData);
-            console.log('[DEBUG] Dropping item into toolbar slot:', { item, slot: index });
-            emit('assign-hotkey', item, index);
+            if (isValidItem(item)) {
+                assignToHotkey(item, index);
+                emit('assign-hotkey', item, index);
+            }
         } catch (error) {
-            console.error('[DEBUG] Error handling toolbar drop:', error);
+            console.error('Error handling toolbar drop:', error);
         }
     }
     activeDropSlot.value = null;
 };
 
+const handleRemoveHotkey = (index: number) => {
+    if (props.toolbarItems[index]) {
+        removeFromHotkey(index);
+        emit('remove-hotkey', index);
+    }
+};
+
 const handleDragEnter = (index: number) => {
-    event?.preventDefault();
-    console.log('[DEBUG] Drag entered toolbar slot:', index);
     activeDropSlot.value = index;
 };
 
 const handleDragLeave = (index: number) => {
-    event?.preventDefault();
     if (activeDropSlot.value === index) {
-        console.log('[DEBUG] Drag left toolbar slot:', index);
         activeDropSlot.value = null;
     }
-};
-
-const removeFromHotkey = (index: number) => {
-    console.log('[DEBUG] Removing item from toolbar slot:', index);
-    emit('remove-hotkey', index);
 };
 </script>
 

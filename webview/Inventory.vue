@@ -1,267 +1,199 @@
 <template>
     <div class="min-h-screen w-screen bg-gradient-to-b from-black via-slate-900/90 to-black text-white">
-        <HeaderComponent :totalWeight="totalWeight" :toolbarItems="toolbarItems" @use-item="useItem" />
+        <!-- Header Section -->
+        <HeaderComponent
+            :total-weight="totalWeight"
+            :toolbar-items="toolbarItems"
+            @use-item="handleUseItem"
+            @assign-hotkey="handleAssignHotkey"
+            @remove-hotkey="handleRemoveHotkey"
+        />
 
         <div class="mx-auto max-w-7xl p-8">
             <div class="grid grid-cols-12 gap-8">
+                <!-- Equipment Section -->
                 <div class="col-span-3">
-                    <EquipmentComponent :equipmentSlots="equipmentSlots" />
+                    <EquipmentComponent
+                        :equipment-slots="equipmentSlots"
+                        @equip-item="handleEquipItem"
+                        @unequip-item="handleUnequipItem"
+                    />
                 </div>
 
+                <!-- Inventory Grid -->
                 <div class="col-span-6">
                     <InventoryGridComponent
                         :inventory="inventoryWithNulls"
-                        @select-item="selectItem"
+                        :toolbar-items="toolbarItems"
+                        @select-item="handleSelectItem"
                         @swap-items="handleSwapItems"
                         @stack-items="handleStackItems"
                         @update-positions="handleUpdatePositions"
                         @split-item="handleSplitItem"
-                        :toolbar-items="toolbarItems"
                     />
                 </div>
 
+                <!-- Details Section -->
                 <div class="col-span-3">
                     <DetailsSectionComponent
-                        :selectedItem="selectedItem"
-                        :toolbarItems="toolbarItems"
-                        @close="selectedItem = null"
-                        @assign-hotkey="assignToHotkey"
-                        @remove-hotkey="removeFromHotkey"
-                        @use-item="useItem"
-                        @drop-item="dropItem"
+                        :selected-item="selectedItem"
+                        :toolbar-items="toolbarItems"
+                        @close="handleCloseDetails"
+                        @assign-hotkey="handleAssignHotkey"
+                        @remove-hotkey="handleRemoveHotkey"
+                        @use-item="handleUseItem"
+                        @drop-item="handleDropItem"
                     />
                 </div>
             </div>
         </div>
+
+        <!-- Split Modal -->
+        <SplitModal
+            v-if="showSplitModal"
+            v-model="showSplitModal"
+            :item="selectedItemForSplit"
+            @update:model-value="closeSplitModal"
+            @split="handleSplitConfirm"
+        />
     </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue';
+import { onMounted, onBeforeUnmount, watch } from 'vue';
 import { useEvents } from '@Composables/useEvents';
-import { InventoryEvents } from '../shared/events';
+import { useInventory } from './composable/useInventory';
+import { useToolbar } from './composable/useToolbar';
+import { useEquipment } from './composable/useEquipment';
+import { useItemSplit } from './composable/useItemSplit';
+import { useWeightManagement } from './composable/useWeightManagement';
+import { useItemValidation } from './composable/useItemValidation';
 import { Item } from '@Shared/types/items.js';
-import { EquipmentSlot } from '../shared/types';
-import { InventoryConfig } from '../shared/config';
+import { InventoryEvents } from '../shared/events';
+
 import HeaderComponent from './components/Header.vue';
 import EquipmentComponent from './components/Equipment.vue';
 import InventoryGridComponent from './components/InventoryGrid.vue';
 import DetailsSectionComponent from './components/DetailSection.vue';
+import SplitModal from './components/SplitModal.vue';
 
 const events = useEvents();
-const TOOLBAR_STORAGE_KEY = 'inventory:toolbar';
-const INVENTORY_POSITIONS_KEY = 'inventory:positions';
 
-const inventory = ref<Item[]>([]);
-const itemPositions = ref<Record<string, number>>({});
-const selectedItem = ref<Item | null>(null);
-const toolbarItems = ref<(Item | null)[]>([null, null, null, null, null]);
+const {
+    inventory,
+    inventoryWithNulls,
+    selectedItem,
+    useItem,
+    dropItem,
+    handleSwapItems,
+    handleStackItems,
+    handleUpdatePositions,
+    loadInventory,
+    loadInventoryPositions,
+    updateInventory,
+} = useInventory();
 
-const equipmentSlots = ref<EquipmentSlot[]>([
-    { id: 'head', name: 'Headwear', icon: '🎩', item: null },
-    { id: 'face', name: 'Face', icon: '🕶️', item: null },
-    { id: 'torso', name: 'Torso', icon: '👕', item: null },
-    { id: 'body_armor', name: 'Body Armor', icon: '🛡️', item: null },
-    { id: 'hands', name: 'Hands', icon: '🧤', item: null },
-    { id: 'legs', name: 'Legs', icon: '👖', item: null },
-    { id: 'feet', name: 'Feet', icon: '👞', item: null },
-    { id: 'accessory', name: 'Accessory', icon: '⌚', item: null },
-]);
+const { toolbarItems, assignToHotkey, removeFromHotkey, loadToolbarFromStorage, updateToolbarItem } = useToolbar();
 
-const findFirstAvailableSlot = (slots: Array<Item | null>): number => {
-    return slots.findIndex((slot) => slot === null);
-};
+const { equipmentSlots, equipItem, unequipItem, hasEquippedItem, canEquipItem } = useEquipment();
 
-const fixItemPositions = (slots: Array<Item | null>) => {
-    const newPositions: Record<string, number> = {};
-    const seenItems = new Set<string>();
+const { showSplitModal, selectedItemForSplit, handleSplitItem, openSplitModal, closeSplitModal } = useItemSplit();
 
-    slots.forEach((item, index) => {
-        if (!item || seenItems.has(item.uid)) return;
-        newPositions[item.uid] = index;
-        seenItems.add(item.uid);
-    });
+const { formattedTotalWeight: totalWeight, canAddItem, getWeightStatus } = useWeightManagement(inventory);
 
-    return newPositions;
-};
+const { isValidItem } = useItemValidation();
 
-const inventoryWithNulls = computed(() => {
-    const result = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
-    const usedPositions = new Set<number>();
-
-    inventory.value.forEach((item) => {
-        if (!isValidItem(item)) return;
-
-        let position = itemPositions.value[item.uid];
-
-        if (position === undefined || position >= result.length || usedPositions.has(position)) {
-            position = findFirstAvailableSlot(result);
-        }
-
-        if (position !== -1 && !usedPositions.has(position)) {
-            result[position] = item;
-            usedPositions.add(position);
-            itemPositions.value[item.uid] = position;
-        }
-    });
-
-    itemPositions.value = fixItemPositions(result);
-    return result;
-});
-
-const totalWeight = computed(() => {
-    return inventory.value.reduce((acc, item) => acc + item.weight * item.quantity, 0).toFixed(1);
-});
-
-const isValidItem = (item: unknown): item is Item => {
-    if (!item || typeof item !== 'object') return false;
-    return ['uid', 'id', 'name', 'weight', 'quantity', 'maxStack', 'icon'].every((prop) => prop in (item as object));
-};
-
-const saveInventoryPositions = () => {
-    localStorage.setItem(INVENTORY_POSITIONS_KEY, JSON.stringify(itemPositions.value));
-};
-
-const loadInventoryPositions = () => {
-    try {
-        const stored = localStorage.getItem(INVENTORY_POSITIONS_KEY);
-        if (stored) {
-            itemPositions.value = JSON.parse(stored);
-        }
-    } catch (error) {
-        console.error('Error loading inventory positions:', error);
-        itemPositions.value = {};
-    }
-};
-
-const saveToolbarToStorage = () => {
-    localStorage.setItem(TOOLBAR_STORAGE_KEY, JSON.stringify(toolbarItems.value));
-};
-
-const loadToolbarFromStorage = () => {
-    try {
-        const stored = localStorage.getItem(TOOLBAR_STORAGE_KEY);
-        if (stored) {
-            toolbarItems.value = JSON.parse(stored);
-        }
-    } catch (error) {
-        console.error('Error loading toolbar:', error);
-        toolbarItems.value = [null, null, null, null, null];
-    }
-};
-
-const assignToHotkey = (item: Item, slot: number) => {
-    if (!isValidItem(item)) return;
-
-    const existingSlot = toolbarItems.value.findIndex((i) => i?.uid === item.uid);
-    if (existingSlot !== -1) {
-        toolbarItems.value[existingSlot] = null;
-    }
-    toolbarItems.value[slot] = item;
-    saveToolbarToStorage();
-};
-
-const removeFromHotkey = (slot: number) => {
-    toolbarItems.value[slot] = null;
-    saveToolbarToStorage();
-};
-
-const selectItem = (item: Item) => {
+const handleSelectItem = (item: Item) => {
     if (!isValidItem(item)) return;
     selectedItem.value = item;
 };
 
-const useItem = (item: Item) => {
+const handleCloseDetails = () => {
+    selectedItem.value = null;
+};
+
+const handleUseItem = async (item: Item) => {
     if (!isValidItem(item)) return;
-    events.emitServer(InventoryEvents.Server.Inventory_UseItem, item);
+    useItem(item);
 };
 
-const dropItem = (item: Item) => {
-    // Implement drop logic here
+const handleDropItem = async (item: Item) => {
+    if (!isValidItem(item)) return;
+    dropItem(item);
 };
 
-const handleSwapItems = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
-
-    const fromItem = inventoryWithNulls.value[fromIndex];
-    const toItem = inventoryWithNulls.value[toIndex];
-
-    if (fromItem && toItem && fromItem.id === toItem.id && fromItem.uid !== toItem.uid) {
-        handleStackItems(toItem.uid, fromItem.uid);
-        return;
-    }
-
-    const newPositions = { ...itemPositions.value };
-
-    if (fromItem) newPositions[fromItem.uid] = toIndex;
-    if (toItem) newPositions[toItem.uid] = fromIndex;
-
-    itemPositions.value = newPositions;
-    saveInventoryPositions();
+const handleAssignHotkey = (item: Item, slot: number) => {
+    if (!isValidItem(item)) return;
+    assignToHotkey(item, slot);
 };
 
-const handleStackItems = (uidToStackOn: string, uidToStack: string) => {
-    if (uidToStackOn === uidToStack) return;
-    events.emitServer(InventoryEvents.Server.Inventory_StackItems, uidToStackOn, uidToStack);
+const handleRemoveHotkey = (slot: number) => {
+    removeFromHotkey(slot);
 };
 
-const handleUpdatePositions = (newArray: (Item | null)[]) => {
-    itemPositions.value = fixItemPositions(newArray);
-    saveInventoryPositions();
+const handleEquipItem = (item: Item, slotId: string) => {
+    if (!isValidItem(item) || !canEquipItem(item, slotId)) return;
+    equipItem(item, slotId);
 };
 
-const handleSplitItem = (item: Item, quantity: number) => {
-    if (!isValidItem(item) || quantity >= item.quantity || quantity <= 0) return;
-    events.emitServer(InventoryEvents.Server.Inventory_SplitItems, item.uid, quantity);
+const handleUnequipItem = (slotId: string) => {
+    unequipItem(slotId);
+};
+
+const handleSplitConfirm = (item: Item, quantity: number) => {
+    if (!isValidItem(item)) return;
+    handleSplitItem(item, quantity);
 };
 
 const setupEventHandlers = () => {
     const handleInventoryUpdate = (itemsFromServer: Array<Item>) => {
         if (!Array.isArray(itemsFromServer)) return;
 
-        inventory.value = itemsFromServer;
+        updateInventory(itemsFromServer);
 
         toolbarItems.value = toolbarItems.value.map((toolbarItem) => {
             if (!toolbarItem) return null;
-            return itemsFromServer.find((item) => item.uid === toolbarItem.uid) || null;
+            const updatedItem = itemsFromServer.find((item) => item.uid === toolbarItem.uid);
+            return updatedItem && isValidItem(updatedItem) ? updatedItem : null;
         });
-
-        itemPositions.value = fixItemPositions(inventoryWithNulls.value);
-        saveInventoryPositions();
     };
 
     events.on(InventoryEvents.Webview.Inventory_UpdateItems, handleInventoryUpdate);
+    events.on(InventoryEvents.Webview.Inventory_UpdateToolbar, (items: Array<Item | null>) => {
+        if (Array.isArray(items)) {
+            toolbarItems.value = items.map((item) => (item && isValidItem(item) ? item : null));
+        }
+    });
+
+    return () => {
+        // events.off(InventoryEvents.Webview.Inventory_UpdateItems, handleInventoryUpdate);
+    };
 };
 
+watch(inventory, () => {
+    const status = getWeightStatus();
+    if (status.status === 'overweight') {
+        // events.emit(InventoryEvents.Webview.Inventory_Error, status.message);
+    }
+});
+
 onMounted(async () => {
-    loadToolbarFromStorage();
-    loadInventoryPositions();
-
     try {
-        const result = await events.emitServerRpc(InventoryEvents.Server.Inventory_RequestItems);
-        if (Array.isArray(result)) {
-            inventory.value = result;
-
-            result.forEach((item, index) => {
-                if (isValidItem(item) && !(item.uid in itemPositions.value)) {
-                    itemPositions.value[item.uid] = index;
-                }
-            });
-
-            toolbarItems.value = toolbarItems.value.map((toolbarItem) =>
-                toolbarItem ? inventory.value.find((item) => item?.uid === toolbarItem.uid) || null : null,
-            );
-
-            itemPositions.value = fixItemPositions(inventoryWithNulls.value);
-            saveInventoryPositions();
-        }
+        loadToolbarFromStorage();
+        loadInventoryPositions();
+        await loadInventory();
     } catch (error) {
-        console.error('Error loading inventory:', error);
+        console.error('Error initializing inventory:', error);
+        //events.emit(InventoryEvents.Webview.Inventory_Error, 'Failed to load inventory');
     }
 });
 
 const cleanup = setupEventHandlers();
-onBeforeUnmount(cleanup);
+onBeforeUnmount(() => {
+    if (typeof cleanup === 'function') {
+        cleanup();
+    }
+});
 </script>
 
 <style scoped>
