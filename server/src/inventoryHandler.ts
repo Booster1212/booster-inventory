@@ -17,6 +17,42 @@ alt.onRpc(InventoryEvents.Server.Inventory_RequestItems, (player: alt.Player) =>
 alt.onClient(InventoryEvents.Server.Inventory_UseItem, (player: alt.Player, item: Item) => {
     ItemManager.usePlayerItemManager(player).use(item.uid);
 });
+alt.on('inventory:useWeapon', async (player: alt.Player, item: Item) => {
+    try {
+        const rPlayer = Rebar.document.character.useCharacter(player);
+        const playerData = rPlayer.get();
+        const playerWeapons = playerData.weapons || [];
+        const weaponHash = alt.hash(item.id);
+        if (playerWeapons.some((w) => w.hash === weaponHash)) {
+            await Rebar.player.useWeapon(player).clearWeapon(weaponHash);
+            rPlayer.set(
+                'weapons',
+                playerWeapons.filter((w) => w.hash !== weaponHash),
+            );
+            await Rebar.usePlayer(player).animation.playFinite('reaction@intimidation@1h', 'outro', 47, 2000, false);
+            return;
+        }
+        for (const weapon of playerWeapons) {
+            await Rebar.player.useWeapon(player).clearWeapon(weapon.hash);
+        }
+
+        await Rebar.player.useWeapon(player).add(item.id, 50);
+        rPlayer.set('weapons', [
+            {
+                hash: weaponHash,
+                ammo: 50,
+                tintIndex: 0,
+                components: [],
+            },
+        ]);
+        await Rebar.usePlayer(player).animation.playFinite('reaction@intimidation@1h', 'intro', 47, 2250, false);
+    } catch (error) {
+        console.error(`Error handling weapon ${item.id}:`, error);
+        const rPlayer = Rebar.document.character.useCharacter(player);
+        await Rebar.player.useWeapon(player).clearWeapon(alt.hash(item.id));
+        rPlayer.set('weapons', []);
+    }
+});
 
 alt.onClient(
     InventoryEvents.Server.Inventory_StackItems,
