@@ -133,10 +133,8 @@ const handleDrop = async (event: DragEvent, targetIndex: number) => {
 
     try {
         if (sourceType === 'inventory') {
-            events.emitServer(InventoryEvents.Server.Inventory_AssignToToolbar, dragItem, targetIndex);
             emit('assign-hotkey', dragItem, targetIndex);
         } else if (sourceType === 'toolbar' && sourceIndex !== null && sourceIndex !== targetIndex) {
-            events.emitServer(InventoryEvents.Server.Inventory_SwapToolbarItems, sourceIndex, targetIndex);
             emit('swap-items', sourceIndex, targetIndex);
         }
     } catch (error) {
@@ -158,7 +156,6 @@ const handleMouseUp = async (event: MouseEvent, targetIndex: number) => {
 
     try {
         if (sourceType === 'inventory') {
-            events.emitServer(InventoryEvents.Server.Inventory_AssignToToolbar, dragItem, targetIndex);
             emit('assign-hotkey', dragItem, targetIndex);
         } else if (sourceType === 'toolbar' && sourceIndex !== null && sourceIndex !== targetIndex) {
             events.emitServer(InventoryEvents.Server.Inventory_SwapToolbarItems, sourceIndex, targetIndex);
@@ -174,7 +171,6 @@ const handleRemoveHotkey = async (index: number) => {
     if (!item || !isValidItem(item)) return;
 
     try {
-        events.emitServer(InventoryEvents.Server.Inventory_RemoveFromToolbar, index);
         emit('remove-hotkey', index);
     } catch (error) {
         console.error('Error removing hotkey:', error);

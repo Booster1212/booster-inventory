@@ -30,7 +30,6 @@
                         @stack-items="handleStackItems"
                         @update-positions="handleUpdatePositions"
                         @split-item="handleSplitItem"
-                        @assign-hotkey="handleAssignHotkey"
                         @drag-start="setCurrentDragData"
                         @drag-end="clearCurrentDragData"
                     />
@@ -41,7 +40,6 @@
                         :selected-item="selectedItem"
                         :toolbar-items="toolbarItems"
                         @close="handleCloseDetails"
-                        @assign-hotkey="handleAssignHotkey"
                         @remove-hotkey="handleRemoveHotkey"
                         @use-item="handleUseItem"
                         @drop-item="handleDropItem"
@@ -143,7 +141,6 @@ const handleUseItem = async (item: Item) => {
 const handleDropItem = async (item: Item) => {
     if (!isValidItem(item)) return;
     await dropItem(item);
-    await events.emitServer(InventoryEvents.Server.Inventory_DropItem, item);
 };
 
 const handleAssignHotkey = async (item: Item, slot: number) => {
@@ -257,3 +254,9 @@ watch(
     { deep: true },
 );
 </script>
+
+<style scoped>
+* {
+    user-select: none;
+}
+</style>

@@ -45,19 +45,30 @@ class ToolbarService {
                 return { success: false, toolbar: currentToolbar, error: 'Invalid slot' };
             }
 
-            const itemIndex = currentInventory.findIndex((invItem) => invItem.uid === item.uid);
-            if (itemIndex === -1) {
-                return { success: false, toolbar: currentToolbar, error: 'Item not found in inventory' };
-            }
+            let newInventory = [...currentInventory];
+            let newToolbar = [...currentToolbar];
+            const existingTargetItem = currentToolbar[slot];
 
-            const newInventory = currentInventory.filter((invItem) => invItem.uid !== item.uid);
-            const existingItem = currentToolbar[slot];
-            if (existingItem) {
-                newInventory.push(existingItem);
-            }
+            const currentToolbarIndex = currentToolbar.findIndex((i) => i?.uid === item.uid);
+            const currentInventoryIndex = currentInventory.findIndex((i) => i?.uid === item.uid);
 
-            const newToolbar = [...currentToolbar];
-            newToolbar[slot] = item;
+            if (currentToolbarIndex !== -1) {
+                newToolbar[currentToolbarIndex] = null;
+                if (existingTargetItem) {
+                    newToolbar[slot] = item;
+                    newToolbar[currentToolbarIndex] = existingTargetItem;
+                } else {
+                    newToolbar[slot] = item;
+                }
+            } else if (currentInventoryIndex !== -1) {
+                newInventory = currentInventory.filter((i) => i?.uid !== item.uid);
+                if (existingTargetItem) {
+                    newInventory.push(existingTargetItem);
+                }
+                newToolbar[slot] = item;
+            } else {
+                return { success: false, toolbar: currentToolbar, error: 'Item not found' };
+            }
 
             await Promise.all([
                 this.updatePlayerToolbar(player, newToolbar),

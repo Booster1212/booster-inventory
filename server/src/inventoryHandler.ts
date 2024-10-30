@@ -41,7 +41,10 @@ export async function updateInventoryWebview(player: alt.Player): Promise<void> 
 }
 
 alt.onClient(InventoryEvents.Server.Inventory_RemoveFromToolbar, async (player: alt.Player, slotIndex: number) => {
-    await toolbarService.handleRemoveFromToolbar(player, slotIndex);
+    const result = await toolbarService.handleRemoveFromToolbar(player, slotIndex);
+    if (!result.success) {
+        console.error('Failed to remove from toolbar:', result.error);
+    }
 });
 
 alt.onClient(
@@ -62,7 +65,10 @@ alt.onClient(InventoryEvents.Server.Inventory_SplitItems, async (player: alt.Pla
 });
 
 alt.onClient(InventoryEvents.Server.Inventory_AssignToToolbar, async (player: alt.Player, item: Item, slot: number) => {
-    await toolbarService.handleAssignToToolbar(player, item, slot);
+    const result = await toolbarService.handleAssignToToolbar(player, item, slot);
+    if (!result.success) {
+        console.error('Failed to assign to toolbar:', result.error);
+    }
 });
 
 alt.onClient(InventoryEvents.Server.Inventory_EquipItem, async (player: alt.Player, item: Item, slotId: string) => {

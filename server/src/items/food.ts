@@ -27,10 +27,7 @@ export const food: Array<Item> = [
         weight: 5,
         useEventName: 'inventory:useFood',
         data: {
-            condition: 100,
-            ammo: '15/15',
-            accuracy: 75,
-            recoil: 'Low',
+            HungerGain: 25,
         },
     },
 ];
@@ -38,4 +35,5 @@ export const food: Array<Item> = [
 const ItemManager = await useApi().getAsync('item-manager-api');
 for (const item of food) {
     ItemManager.useItemManager().create(item);
+    ItemManager.useItemManager().update(item);
 }

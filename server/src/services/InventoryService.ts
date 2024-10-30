@@ -4,6 +4,7 @@ import { Item } from '@Shared/types/items.js';
 import { InventoryConfig } from '../../../shared/config.js';
 import { InventoryEvents } from '../../../shared/events.js';
 import { useWebview } from '@Server/player/webview.js';
+import { useApi } from '@Server/api/index.js';
 
 const Rebar = useRebar();
 
@@ -179,6 +180,54 @@ class InventoryService {
             return { success: false, inventory: [], error: 'Internal error' };
         }
     }
+
+    public async updateItemInInventoryToolbarEquipment(player: alt.Player): Promise<void> {
+        try {
+            const rebarDocument = Rebar.document.character.useCharacter(player);
+            const inventory = [...(rebarDocument.get().items || [])];
+            const toolbar = [...(rebarDocument.get().toolbar || [])];
+            const equipment = [...(rebarDocument.get().equipment || [])];
+
+            const ItemManager = await useApi().getAsync('item-manager-api');
+
+            const updateItem = (item: Item | null) => {
+                if (item && item.id) {
+                    const updatedItem = ItemManager.useItemManager().getBaseItem(item.id);
+                    if (updatedItem) {
+                        return { ...item, ...updatedItem };
+                    }
+                }
+                return item;
+            };
+
+            const updatedInventory = inventory.map(updateItem);
+            const updatedToolbar = toolbar.map(updateItem);
+            const updatedEquipment = equipment.map((slot) => {
+                if (slot.item) {
+                    return { ...slot, item: updateItem(slot.item) };
+                }
+                return slot;
+            });
+
+            await Promise.all([
+                this.updatePlayerInventory(
+                    player,
+                    updatedInventory.filter((item): item is Item => item !== null),
+                ),
+                rebarDocument.set('toolbar', updatedToolbar),
+                rebarDocument.set('equipment', updatedEquipment),
+            ]);
+
+            const Webview = useWebview(player);
+            Webview.emit(InventoryEvents.Webview.Inventory_UpdateToolbar, updatedToolbar);
+            Webview.emit(InventoryEvents.Webview.Inventory_UpdateEquipment, updatedEquipment);
+        } catch (error) {
+            console.error('Error updating player items:', error);
+        }
+    }
 }
 
 export const inventoryService = new InventoryService();
+alt.on('rebar:playerCharacterBound', async (player: alt.Player) => {
+    await inventoryService.updateItemInInventoryToolbarEquipment(player);
+});
