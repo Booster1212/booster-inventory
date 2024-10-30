@@ -6,7 +6,7 @@ import { ref, computed } from 'vue';
 import { useItemValidation } from './useItemValidation.js';
 
 export function useInventory() {
-    const { isValidItem, canItemsStack } = useItemValidation();
+    const { isValidItem } = useItemValidation();
     const events = useEvents();
     const inventory = ref<Item[]>([]);
     const itemPositions = ref<Record<string, number>>({});
@@ -16,11 +16,12 @@ export function useInventory() {
         return isValidItem(item);
     };
 
-    const updateInventory = (items: Item[]) => {
+    const updateInventory = (items: Item[]): boolean => {
         if (!Array.isArray(items)) return false;
-        const validItems = items.filter(validateInventoryItem);
 
+        const validItems = items.filter(validateInventoryItem);
         inventory.value = validItems;
+
         validItems.forEach((item, index) => {
             if (!(item.uid in itemPositions.value)) {
                 itemPositions.value[item.uid] = index;
@@ -73,11 +74,8 @@ export function useInventory() {
         return result;
     });
 
-    const INVENTORY_POSITIONS_KEY = 'inventory:positions';
-
     const saveInventoryPositions = () => {
         try {
-            localStorage.setItem(INVENTORY_POSITIONS_KEY, JSON.stringify(itemPositions.value));
             return true;
         } catch (error) {
             console.error('Error saving inventory positions:', error);
@@ -86,35 +84,22 @@ export function useInventory() {
     };
 
     const loadInventoryPositions = () => {
-        try {
-            const stored = localStorage.getItem(INVENTORY_POSITIONS_KEY);
-            if (!stored) return false;
-
-            const parsed = JSON.parse(stored);
-            if (typeof parsed !== 'object') return false;
-
-            itemPositions.value = parsed;
-            return true;
-        } catch (error) {
-            console.error('Error loading inventory positions:', error);
-            itemPositions.value = {};
-            return false;
-        }
+        return true;
     };
 
-    const useItem = (item: Item | null) => {
+    const useItem = async (item: Item | null) => {
         if (!item || !validateInventoryItem(item)) return false;
         events.emitServer(InventoryEvents.Server.Inventory_UseItem, item);
         return true;
     };
 
-    const dropItem = (item: Item | null) => {
+    const dropItem = async (item: Item | null) => {
         if (!item || !validateInventoryItem(item)) return false;
         events.emitServer(InventoryEvents.Server.Inventory_DropItem, item);
         return true;
     };
 
-    const handleSwapItems = (fromIndex: number, toIndex: number) => {
+    const handleSwapItems = async (fromIndex: number, toIndex: number) => {
         if (fromIndex === toIndex) return false;
         if (fromIndex < 0 || toIndex < 0) return false;
         if (fromIndex >= inventoryWithNulls.value.length || toIndex >= inventoryWithNulls.value.length) return false;
@@ -126,32 +111,24 @@ export function useInventory() {
             return handleStackItems(toItem.uid, fromItem.uid);
         }
 
-        const newPositions = { ...itemPositions.value };
-
-        if (fromItem) newPositions[fromItem.uid] = toIndex;
-        if (toItem) newPositions[toItem.uid] = fromIndex;
-
-        itemPositions.value = newPositions;
-        saveInventoryPositions();
+        events.emitServer(InventoryEvents.Server.Inventory_SwapItems, fromIndex, toIndex);
         return true;
     };
 
-    const handleStackItems = (uidToStackOn: string, uidToStack: string) => {
-        if (
-            uidToStackOn === uidToStack ||
-            !canItemsStack(
-                inventoryWithNulls.value[itemPositions.value[uidToStackOn]],
-                inventoryWithNulls.value[itemPositions.value[uidToStack]],
-            )
-        )
-            return false;
+    const handleStackItems = async (uidToStackOn: string, uidToStack: string) => {
         events.emitServer(InventoryEvents.Server.Inventory_StackItems, uidToStackOn, uidToStack);
         return true;
     };
 
-    const handleUpdatePositions = (newArray: (Item | null)[]) => {
-        itemPositions.value = fixItemPositions(newArray);
-        return saveInventoryPositions();
+    const handleUpdatePositions = async (newArray: (Item | null)[]) => {
+        try {
+            events.emitServer(InventoryEvents.Webview.Inventory_UpdateItems, newArray);
+            itemPositions.value = fixItemPositions(newArray);
+            return true;
+        } catch (error) {
+            console.error('Error updating positions:', error);
+            return false;
+        }
     };
 
     const loadInventory = async () => {
@@ -166,6 +143,11 @@ export function useInventory() {
             return false;
         }
     };
+
+    events.on(InventoryEvents.Webview.Inventory_UpdateItems, (items: Array<Item | null>) => {
+        const validItems = items.filter((item): item is Item => item !== null && validateInventoryItem(item));
+        updateInventory(validItems);
+    });
 
     return {
         inventory,

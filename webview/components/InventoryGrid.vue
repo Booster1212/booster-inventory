@@ -1,3 +1,4 @@
+//InventoryGrid.vue
 <template>
     <div
         class="flex h-[70vh] flex-col rounded-xl border border-white/10 bg-gradient-to-b from-white/10 to-transparent p-6 backdrop-blur-sm"
@@ -57,10 +58,7 @@
                                     :src="getItemAtIndex(index - 1).icon"
                                     :alt="getItemAtIndex(index - 1).name"
                                     class="h-full w-full object-cover transition-transform duration-300"
-                                    :class="{
-                                        'group-hover:scale-110': !isDraggingFromIndex(index - 1, 'inventory'),
-                                        'scale-95': isDraggingFromIndex(index - 1, 'inventory'),
-                                    }"
+                                    :class="imageClasses(index - 1)"
                                     draggable="false"
                                 />
                                 <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 p-2">
@@ -95,14 +93,16 @@
     </div>
 </template>
 
-<script setup lang="ts">
-import { onMounted, onUnmounted, provide, ref } from 'vue';
+<script lang="ts" setup>
+import { onMounted, onUnmounted, ref } from 'vue';
 import { InventoryConfig } from '../../shared/config';
 import { Item } from '@Shared/types/items';
 import { useDragAndDrop } from '../composable/useDragAndDrop';
 import { useToolbar } from '../composable/useToolbar';
 import { useItemValidation } from '../composable/useItemValidation';
 import { useInventory } from '../composable/useInventory';
+import { useEvents } from '@Composables/useEvents';
+import { InventoryEvents } from '../../shared/events';
 import SplitModal from './SplitModal.vue';
 import { useItemSplit } from '../composable/useItemSplit';
 
@@ -129,14 +129,17 @@ interface Emits {
 
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
+const events = useEvents();
 
 const { showSplitModal, selectedItemForSplit, handleSplitItem, openSplitModal } = useItemSplit();
 const { isValidItem } = useItemValidation();
+const { getHotkeyNumber } = useToolbar();
+const { canItemsStack } = useItemValidation();
+const { updateInventory } = useInventory();
 const isDraggingOver = ref<number | null>(null);
 
 const {
     isDragging,
-    draggedItem,
     handleMouseDown: startDrag,
     handleMouseMove: moveDrag,
     handleMouseUp: endDrag,
@@ -144,71 +147,79 @@ const {
     cleanup,
 } = useDragAndDrop();
 
-const { getHotkeyNumber } = useToolbar();
-const { canItemsStack } = useItemValidation();
-const { updateInventory } = useInventory();
-
-const getItemAtIndex = (index: number): Item | null => props.inventory[index] || null;
+const getItemAtIndex = (index: number): Item | null => {
+    if (index >= props.inventory.length) return null;
+    return props.inventory[index];
+};
 
 const handleMouseDown = (event: MouseEvent, index: number) => {
     const item = getItemAtIndex(index);
     if (!item || !isValidItem(item)) return;
 
-    console.log('Grid MouseDown:', { index, item, type: 'inventory' });
     startDrag(event, index, item, 'inventory');
     emit('drag-start', { item, sourceIndex: index, sourceType: 'inventory' });
 };
 
 const handleDragStart = (event: DragEvent, index: number) => {
     if (!event.dataTransfer) return;
-
     const item = getItemAtIndex(index);
     if (!item || !isValidItem(item)) return;
 
-    event.dataTransfer.effectAllowed = 'move';
-
+    event.dataTransfer.setData('application/json', JSON.stringify(item));
     const img = new Image();
     img.src = item.icon;
     event.dataTransfer.setDragImage(img, 36, 36);
+    event.dataTransfer.effectAllowed = 'move';
 
     startDrag(event, index, item, 'inventory');
     emit('drag-start', { item, sourceIndex: index, sourceType: 'inventory' });
+};
+
+const handleSwapItems = async (fromIndex: number, toIndex: number) => {
+    try {
+        if (fromIndex === toIndex) return;
+        if (fromIndex < 0 || toIndex < 0) return;
+        if (fromIndex >= props.inventory.length || toIndex >= props.inventory.length) return;
+
+        events.emitServer(InventoryEvents.Server.Inventory_SwapItems, fromIndex, toIndex);
+
+        const newInventory = [...props.inventory];
+        [newInventory[fromIndex], newInventory[toIndex]] = [newInventory[toIndex], newInventory[fromIndex]];
+
+        emit('update-positions', newInventory);
+        updateInventory(newInventory.filter((item): item is Item => item !== null));
+        emit('swap-items', fromIndex, toIndex);
+    } catch (error) {
+        console.error('Error swapping items:', error);
+    }
 };
 
 const handleDrop = async (event: DragEvent, targetIndex: number) => {
     event.preventDefault();
     isDraggingOver.value = null;
 
-    const { item, sourceIndex, sourceType } = props.currentDragData;
-    console.log('Grid handleDrop:', { targetIndex, currentDragData: props.currentDragData });
-
-    if (!item || !isValidItem(item) || sourceIndex === null) return;
+    const { item: dragItem, sourceIndex, sourceType } = props.currentDragData;
+    if (!dragItem || !isValidItem(dragItem) || sourceIndex === null) return;
 
     if (sourceType === 'toolbar') {
-        emit('assign-hotkey', item, targetIndex);
+        emit('assign-hotkey', dragItem, targetIndex);
         return;
     }
 
-    if (sourceType === 'inventory') {
-        if (sourceIndex === targetIndex) return;
-
+    if (sourceType === 'inventory' && sourceIndex !== targetIndex) {
         const targetItem = getItemAtIndex(targetIndex);
-        if (targetItem && canItemsStack(item, targetItem)) {
-            emit('stack-items', targetItem.uid, item.uid);
-            return;
+        if (targetItem && canItemsStack(dragItem, targetItem)) {
+            await handleStackItems(targetItem.uid, dragItem.uid);
+        } else {
+            await handleSwapItems(sourceIndex, targetIndex);
         }
-
-        emit('swap-items', sourceIndex, targetIndex);
     }
+
+    emit('drag-end');
 };
 
 const handleMouseUp = async (event: MouseEvent, targetIndex: number) => {
     const { wasClick, sourceIndex, sourceType, item } = endDrag(event, targetIndex, 'inventory');
-    console.log('Grid handleMouseUp:', {
-        wasClick,
-        dragData: props.currentDragData,
-        endDragResult: { sourceIndex, sourceType, item },
-    });
 
     if (wasClick) {
         const clickedItem = getItemAtIndex(targetIndex);
@@ -218,47 +229,22 @@ const handleMouseUp = async (event: MouseEvent, targetIndex: number) => {
         }
     }
 
-    const { item: currentItem, sourceIndex: currentSourceIndex, sourceType: currentSourceType } = props.currentDragData;
-    if (!currentItem || currentSourceIndex === null) return;
-    if (currentSourceIndex === targetIndex) return;
-
-    if (currentSourceType === 'toolbar') {
-        emit('assign-hotkey', currentItem, targetIndex);
-        return;
-    }
-
-    const targetItem = getItemAtIndex(targetIndex);
-    if (targetItem && canItemsStack(currentItem, targetItem)) {
-        emit('stack-items', targetItem.uid, currentItem.uid);
-        return;
-    }
-
-    emit('swap-items', currentSourceIndex, targetIndex);
-};
-
-const handleDragOver = (event: DragEvent, index: number) => {
-    event.preventDefault();
-    isDraggingOver.value = index;
-    if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = 'move';
+    if (sourceIndex !== null && sourceType === 'inventory' && sourceIndex !== targetIndex) {
+        const targetItem = getItemAtIndex(targetIndex);
+        if (item && targetItem && canItemsStack(item, targetItem)) {
+            await handleStackItems(targetItem.uid, item.uid);
+        } else if (item) {
+            await handleSwapItems(sourceIndex, targetIndex);
+        }
     }
 };
 
-const handleDragEnd = () => {
-    console.log('Grid DragEnd');
-    isDraggingOver.value = null;
-    cleanup();
-    emit('drag-end');
+const handleStackItems = async (uidToStackOn: string, uidToStack: string) => {
+    events.emitServer(InventoryEvents.Server.Inventory_StackItems, uidToStackOn, uidToStack);
+    emit('stack-items', uidToStackOn, uidToStack);
 };
 
-const handleRightClick = (event: MouseEvent, index: number) => {
-    const item = getItemAtIndex(index);
-    if (item?.quantity > 1) {
-        openSplitModal(item);
-    }
-};
-
-const handleSort = () => {
+const handleSort = async () => {
     const sortedItems = [...props.inventory]
         .filter((item): item is Item => item !== null)
         .sort((a, b) => {
@@ -274,6 +260,34 @@ const handleSort = () => {
     updateInventory(newInventory);
     emit('update-positions', newInventory);
 };
+
+const handleRightClick = (event: MouseEvent, index: number) => {
+    const item = getItemAtIndex(index);
+    if (item?.quantity > 1) {
+        openSplitModal(item);
+    }
+};
+
+const handleDragOver = (event: DragEvent, index: number) => {
+    event.preventDefault();
+    isDraggingOver.value = index;
+    if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+    }
+};
+
+const handleDragEnd = () => {
+    isDraggingOver.value = null;
+    cleanup();
+    emit('drag-end');
+};
+
+const imageClasses = (index: number) => ({
+    'h-full w-full object-cover rounded-lg transition-transform duration-300': true,
+    'group-hover:scale-110': !isDraggingFromIndex(index, 'inventory'),
+    'scale-95 brightness-75': isDraggingFromIndex(index, 'inventory'),
+    'scale-100': isDraggingOver.value === index,
+});
 
 const slotClasses = (index: number) => ({
     'cursor-grab': getItemAtIndex(index) && !isDragging.value,

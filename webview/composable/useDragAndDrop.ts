@@ -19,7 +19,7 @@ interface DragState {
 export function useDragAndDrop() {
     const { isValidItem } = useItemValidation();
     const DRAG_DELAY = 150;
-    const CLICK_THRESHOLD = 5;
+    const CLICK_THRESHOLD = 25;
     const DRAG_TIME_THRESHOLD = 200;
 
     const dragState = ref<DragState>({
@@ -34,9 +34,101 @@ export function useDragAndDrop() {
         dragStartTime: 0,
     });
 
+    let preservedState = {
+        draggedItem: null as Item | null,
+        sourceIndex: null as number | null,
+        sourceType: null as DragSource | null,
+    };
+
     let ghostElement: HTMLElement | null = null;
     let dragStartDistance = 0;
-    let preservedState: Partial<DragState> | null = null;
+
+    const handleMouseDown = (event: MouseEvent, index: number, item: Item, sourceType: DragSource) => {
+        if (!isValidItem(item) || event.button !== 0) return;
+
+        dragStartDistance = 0;
+        dragState.value = {
+            isDragging: false,
+            isMouseDown: true,
+            startPosition: { x: event.clientX, y: event.clientY },
+            currentPosition: { x: event.clientX, y: event.clientY },
+            draggedItem: item,
+            sourceIndex: index,
+            sourceType,
+            dragStartTime: Date.now(),
+            dragTimer: window.setTimeout(() => {
+                if (dragState.value.isMouseDown && dragStartDistance < CLICK_THRESHOLD) {
+                    startDrag();
+                }
+            }, DRAG_DELAY) as unknown as number,
+        };
+
+        preservedState = {
+            draggedItem: item,
+            sourceIndex: index,
+            sourceType,
+        };
+
+        document.addEventListener('mouseup', handleGlobalMouseUp, { once: true });
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+        if (!dragState.value.isMouseDown) return;
+
+        const dx = event.clientX - dragState.value.startPosition.x;
+        const dy = event.clientY - dragState.value.startPosition.y;
+        dragStartDistance = Math.sqrt(dx * dx + dy * dy);
+
+        if (dragStartDistance > CLICK_THRESHOLD && !dragState.value.isDragging && dragState.value.dragTimer) {
+            window.clearTimeout(dragState.value.dragTimer);
+            dragState.value.dragTimer = null;
+            startDrag();
+        }
+
+        if (dragState.value.isDragging && ghostElement) {
+            ghostElement.style.left = `${event.clientX}px`;
+            ghostElement.style.top = `${event.clientY}px`;
+            dragState.value.currentPosition = { x: event.clientX, y: event.clientY };
+            document.body.style.cursor = 'grabbing';
+        }
+    };
+
+    const handleMouseUp = (event: MouseEvent, targetIndex: number, targetType: DragSource) => {
+        const wasClick =
+            !dragState.value.isDragging && Date.now() - dragState.value.dragStartTime < DRAG_TIME_THRESHOLD;
+
+        const result = {
+            wasClick,
+            sourceIndex: preservedState.sourceIndex,
+            sourceType: preservedState.sourceType,
+            targetIndex,
+            targetType,
+            item: preservedState.draggedItem,
+            _debug: {
+                dragDistance: calculateDistance(event),
+                dragTime: Date.now() - dragState.value.dragStartTime,
+                thresholds: {
+                    distance: CLICK_THRESHOLD,
+                    time: DRAG_TIME_THRESHOLD,
+                },
+            },
+        };
+
+        cleanup();
+        return result;
+    };
+
+    const handleGlobalMouseUp = (event: MouseEvent) => {
+        document.body.style.cursor = '';
+        cleanup();
+    };
+
+    const startDrag = () => {
+        if (!dragState.value.draggedItem) return;
+        dragState.value.isDragging = true;
+        createGhostElement(dragState.value.draggedItem);
+        document.body.style.cursor = 'grabbing';
+    };
 
     const createGhostElement = (item: Item) => {
         if (ghostElement) {
@@ -82,25 +174,13 @@ export function useDragAndDrop() {
         document.body.appendChild(ghostElement);
     };
 
-    const preserveState = () => {
-        preservedState = {
-            draggedItem: dragState.value.draggedItem,
-            sourceIndex: dragState.value.sourceIndex,
-            sourceType: dragState.value.sourceType,
-        };
-    };
-
-    const restoreState = () => {
-        if (preservedState) {
-            dragState.value.draggedItem = preservedState.draggedItem || null;
-            dragState.value.sourceIndex = preservedState.sourceIndex || null;
-            dragState.value.sourceType = preservedState.sourceType || null;
-        }
+    const calculateDistance = (event: MouseEvent) => {
+        const dx = event.clientX - dragState.value.startPosition.x;
+        const dy = event.clientY - dragState.value.startPosition.y;
+        return Math.sqrt(dx * dx + dy * dy);
     };
 
     const cleanup = () => {
-        preserveState();
-
         if (dragState.value.dragTimer) {
             window.clearTimeout(dragState.value.dragTimer);
         }
@@ -109,27 +189,6 @@ export function useDragAndDrop() {
             ghostElement.parentNode.removeChild(ghostElement);
             ghostElement = null;
         }
-
-        dragState.value = {
-            ...dragState.value,
-            isDragging: false,
-            startPosition: { x: 0, y: 0 },
-            currentPosition: { x: 0, y: 0 },
-            dragTimer: null,
-            isMouseDown: false,
-        };
-
-        document.body.style.cursor = '';
-    };
-
-    const fullCleanup = () => {
-        if (ghostElement && ghostElement.parentNode) {
-            ghostElement.parentNode.removeChild(ghostElement);
-            ghostElement = null;
-        }
-
-        preservedState = null;
-        dragStartDistance = 0;
 
         dragState.value = {
             isDragging: false,
@@ -146,108 +205,11 @@ export function useDragAndDrop() {
         document.body.style.cursor = '';
     };
 
-    const handleMouseDown = (event: MouseEvent, index: number, item: Item, sourceType: DragSource) => {
-        if (!isValidItem(item) || event.button !== 0) return;
-
-        dragStartDistance = 0;
-        preservedState = null;
-
-        dragState.value = {
-            ...dragState.value,
-            isDragging: false,
-            isMouseDown: true,
-            startPosition: { x: event.clientX, y: event.clientY },
-            currentPosition: { x: event.clientX, y: event.clientY },
-            draggedItem: item,
-            sourceIndex: index,
-            sourceType,
-            dragStartTime: Date.now(),
-            dragTimer: window.setTimeout(() => {
-                if (dragState.value.isMouseDown && dragStartDistance < CLICK_THRESHOLD) {
-                    startDrag();
-                }
-            }, DRAG_DELAY) as unknown as number,
-        };
-
-        preserveState();
-        document.addEventListener('mouseup', handleGlobalMouseUp, { once: true });
-    };
-
-    const handleMouseMove = (event: MouseEvent) => {
-        if (!dragState.value.isMouseDown) return;
-
-        const dx = event.clientX - dragState.value.startPosition.x;
-        const dy = event.clientY - dragState.value.startPosition.y;
-        dragStartDistance = Math.sqrt(dx * dx + dy * dy);
-
-        if (dragStartDistance > CLICK_THRESHOLD && !dragState.value.isDragging && dragState.value.dragTimer) {
-            window.clearTimeout(dragState.value.dragTimer);
-            dragState.value.dragTimer = null;
-            startDrag();
-        }
-
-        if (dragState.value.isDragging && ghostElement) {
-            ghostElement.style.left = `${event.clientX}px`;
-            ghostElement.style.top = `${event.clientY}px`;
-            dragState.value.currentPosition = { x: event.clientX, y: event.clientY };
-            document.body.style.cursor = 'grabbing';
-        }
-    };
-
-    const startDrag = () => {
-        if (!dragState.value.draggedItem) return;
-
-        dragState.value.isDragging = true;
-        preserveState();
-        createGhostElement(dragState.value.draggedItem);
-        document.body.style.cursor = 'grabbing';
-    };
-
-    const handleGlobalMouseUp = (event: MouseEvent) => {
-        document.body.style.cursor = '';
-        cleanup();
-    };
-
-    const handleMouseUp = (event: MouseEvent, targetIndex: number, targetType: DragSource) => {
-        restoreState();
-
-        const dragTime = Date.now() - dragState.value.dragStartTime;
-        const wasClick = dragStartDistance < CLICK_THRESHOLD && dragTime < DRAG_TIME_THRESHOLD;
-
-        const result = {
-            wasClick,
-            sourceIndex: dragState.value.sourceIndex,
-            sourceType: dragState.value.sourceType,
-            targetIndex,
-            targetType,
-            item: dragState.value.draggedItem,
-            _debug: {
-                dragDistance: dragStartDistance,
-                dragTime,
-                thresholds: {
-                    distance: CLICK_THRESHOLD,
-                    time: DRAG_TIME_THRESHOLD,
-                },
-            },
-        };
-
-        console.log('DragAndDrop MouseUp:', JSON.stringify(result, undefined, 4));
-
-        cleanup();
-        return result;
-    };
-
     const isDraggingFromIndex = (index: number, type: DragSource): boolean => {
         return (
             dragState.value.isDragging && dragState.value.sourceIndex === index && dragState.value.sourceType === type
         );
     };
-
-    const getDragData = () => ({
-        sourceIndex: dragState.value.sourceIndex,
-        sourceType: dragState.value.sourceType,
-        item: dragState.value.draggedItem,
-    });
 
     return {
         isDragging: computed(() => dragState.value.isDragging),
@@ -256,7 +218,6 @@ export function useDragAndDrop() {
         handleMouseMove,
         handleMouseUp,
         isDraggingFromIndex,
-        getDragData,
-        cleanup: fullCleanup,
+        cleanup,
     };
 }

@@ -1,3 +1,4 @@
+//QuickAccess.vue
 <template>
     <div class="flex items-center gap-2">
         <div class="text-xs text-gray-500">Quick Access</div>
@@ -99,7 +100,7 @@ const {
     cleanup,
 } = useDragAndDrop();
 
-const isItemDraggable = (item: Item | null) => !!item?.data?.isToolbar;
+const isItemDraggable = (item: Item | null) => !!item?.useEventName;
 
 const handleMouseDown = (event: MouseEvent, index: number) => {
     const item = props.toolbarItems[index];
@@ -123,21 +124,27 @@ const handleDragStart = (event: DragEvent, index: number) => {
     emit('drag-start', { item, sourceIndex: index, sourceType: 'toolbar' });
 };
 
-const handleDrop = (event: DragEvent, targetIndex: number) => {
+const handleDrop = async (event: DragEvent, targetIndex: number) => {
     event.preventDefault();
     isDraggingOver.value = null;
 
     const { item: dragItem, sourceIndex, sourceType } = props.currentDragData;
-    if (!dragItem || !isValidItem(dragItem) || !isItemDraggable(dragItem) || sourceIndex === targetIndex) return;
+    if (!dragItem || !isValidItem(dragItem) || !isItemDraggable(dragItem)) return;
 
-    if (sourceType === 'inventory') {
-        emit('assign-hotkey', dragItem, targetIndex);
-    } else if (sourceType === 'toolbar' && sourceIndex !== null) {
-        processSwap(sourceIndex, targetIndex);
+    try {
+        if (sourceType === 'inventory') {
+            events.emitServer(InventoryEvents.Server.Inventory_AssignToToolbar, dragItem, targetIndex);
+            emit('assign-hotkey', dragItem, targetIndex);
+        } else if (sourceType === 'toolbar' && sourceIndex !== null && sourceIndex !== targetIndex) {
+            events.emitServer(InventoryEvents.Server.Inventory_SwapToolbarItems, sourceIndex, targetIndex);
+            emit('swap-items', sourceIndex, targetIndex);
+        }
+    } catch (error) {
+        console.error('Error handling drop:', error);
     }
 };
 
-const handleMouseUp = (event: MouseEvent, targetIndex: number) => {
+const handleMouseUp = async (event: MouseEvent, targetIndex: number) => {
     const { wasClick, item } = endDrag(event, targetIndex, 'toolbar');
     isDraggingOver.value = null;
 
@@ -147,29 +154,31 @@ const handleMouseUp = (event: MouseEvent, targetIndex: number) => {
     }
 
     const { item: dragItem, sourceIndex, sourceType } = props.currentDragData;
-    if (!dragItem || !isValidItem(dragItem) || sourceIndex === null || !isItemDraggable(dragItem)) return;
+    if (!dragItem || !isValidItem(dragItem) || !isItemDraggable(dragItem)) return;
 
-    if (sourceType === 'inventory') {
-        emit('assign-hotkey', dragItem, targetIndex);
-    } else if (sourceType === 'toolbar') {
-        processSwap(sourceIndex, targetIndex);
+    try {
+        if (sourceType === 'inventory') {
+            events.emitServer(InventoryEvents.Server.Inventory_AssignToToolbar, dragItem, targetIndex);
+            emit('assign-hotkey', dragItem, targetIndex);
+        } else if (sourceType === 'toolbar' && sourceIndex !== null && sourceIndex !== targetIndex) {
+            events.emitServer(InventoryEvents.Server.Inventory_SwapToolbarItems, sourceIndex, targetIndex);
+            emit('swap-items', sourceIndex, targetIndex);
+        }
+    } catch (error) {
+        console.error('Error handling mouse up:', error);
     }
 };
 
-const processSwap = (sourceIndex: number, targetIndex: number) => {
-    if (sourceIndex === targetIndex) return;
-
-    const sourceItem = props.toolbarItems[sourceIndex];
-    const targetItem = props.toolbarItems[targetIndex];
-
-    if (isValidItem(sourceItem)) {
-        emit('swap-items', sourceIndex, targetIndex);
-    }
-};
-
-const handleRemoveHotkey = (index: number) => {
+const handleRemoveHotkey = async (index: number) => {
     const item = props.toolbarItems[index];
-    if (item && isValidItem(item)) emit('remove-hotkey', index);
+    if (!item || !isValidItem(item)) return;
+
+    try {
+        events.emitServer(InventoryEvents.Server.Inventory_RemoveFromToolbar, index);
+        emit('remove-hotkey', index);
+    } catch (error) {
+        console.error('Error removing hotkey:', error);
+    }
 };
 
 const dropTargetClasses = (index: number) => ({
@@ -200,7 +209,6 @@ const handleDragEnd = () => {
 
 const handleDragOver = (event: DragEvent, index: number) => {
     event.preventDefault();
-
     const { item: dragItem } = props.currentDragData;
 
     if (dragItem && isValidItem(dragItem) && isItemDraggable(dragItem)) {

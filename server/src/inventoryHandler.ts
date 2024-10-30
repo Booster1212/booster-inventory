@@ -2,158 +2,127 @@ import * as alt from 'alt-server';
 import { useRebar } from '@Server/index.js';
 import { useWebview } from '@Server/player/webview.js';
 import { Item } from '@Shared/types/items.js';
-import { useApi } from '@Server/api/index.js';
 import { InventoryEvents } from '../../shared/events.js';
-import { InventoryConfig } from '../../shared/config.js';
+import { EquipmentSlot, DEFAULT_EQUIPMENT_SLOTS } from '../../shared/types.js';
+import { inventoryService } from './services/InventoryService.js';
+import { toolbarService } from './services/ToolbarService.js';
+import { equipmentService } from './services/EquipmentService.js';
 
 const Rebar = useRebar();
-const ItemManager = await useApi().getAsync('item-manager-api');
 
-alt.onRpc(InventoryEvents.Server.Inventory_RequestItems, (player: alt.Player) => {
-    const rebarDocument = Rebar.document.character.useCharacter(player).get();
-    return rebarDocument.items;
+declare module '@Shared/types/Character.js' {
+    export interface Character {
+        equipment?: Array<EquipmentSlot>;
+        lastWeapon?: {
+            hash: number;
+            ammo: number;
+            tintIndex: number;
+            components: any[];
+        };
+    }
+}
+
+export async function updateInventoryWebview(player: alt.Player): Promise<void> {
+    try {
+        const rebarDocument = Rebar.document.character.useCharacter(player).get();
+        const Webview = useWebview(player);
+
+        const inventoryWithEmptySlots = inventoryService.createInventoryWithEmptySlots(rebarDocument.items || []);
+        Webview.emit(InventoryEvents.Webview.Inventory_UpdateItems, inventoryWithEmptySlots);
+
+        const toolbar = rebarDocument.toolbar || new Array(5).fill(null);
+        Webview.emit(InventoryEvents.Webview.Inventory_UpdateToolbar, toolbar);
+
+        const equipment = rebarDocument.equipment || DEFAULT_EQUIPMENT_SLOTS;
+        Webview.emit(InventoryEvents.Webview.Inventory_UpdateEquipment, equipment);
+    } catch (error) {
+        console.error('Error updating inventory webview:', error);
+    }
+}
+
+alt.onClient(InventoryEvents.Server.Inventory_RemoveFromToolbar, async (player: alt.Player, slotIndex: number) => {
+    await toolbarService.handleRemoveFromToolbar(player, slotIndex);
 });
 
 alt.onClient(
     InventoryEvents.Server.Inventory_StackItems,
     async (player: alt.Player, uidToStackOn: string, uidToStack: string) => {
-        try {
-            const rebarDocument = Rebar.document.character.useCharacter(player);
-            let inventory = [...rebarDocument.get().items];
-
-            const targetItemIndex = inventory.findIndex((item) => item.uid === uidToStackOn);
-            const sourceItemIndex = inventory.findIndex((item) => item.uid === uidToStack);
-
-            if (targetItemIndex === -1 || sourceItemIndex === -1) {
-                return;
-            }
-
-            const targetItem = { ...inventory[targetItemIndex] };
-            const sourceItem = { ...inventory[sourceItemIndex] };
-
-            if (targetItem.id !== sourceItem.id) {
-                return;
-            }
-
-            const availableSpace = targetItem.maxStack - targetItem.quantity;
-            if (availableSpace <= 0) {
-                return;
-            }
-
-            const amountToStack = Math.min(availableSpace, sourceItem.quantity);
-
-            let newInventory = inventory.map((item) => ({ ...item }));
-
-            newInventory[targetItemIndex] = {
-                ...targetItem,
-                quantity: targetItem.quantity + amountToStack,
-            };
-
-            if (sourceItem.quantity - amountToStack <= 0) {
-                newInventory = newInventory.filter((_, index) => index !== sourceItemIndex);
-            } else {
-                newInventory[sourceItemIndex] = {
-                    ...sourceItem,
-                    quantity: sourceItem.quantity - amountToStack,
-                };
-            }
-
-            const oldTotal = inventory.reduce((sum, item) => sum + item.quantity, 0);
-            const newTotal = newInventory.reduce((sum, item) => sum + item.quantity, 0);
-
-            if (oldTotal !== newTotal) {
-                return;
-            }
-
-            rebarDocument.set('items', newInventory);
-
-            const Webview = useWebview(player);
-            const inventoryWithEmptySlots = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
-            newInventory.forEach((item, index) => {
-                if (index < inventoryWithEmptySlots.length) {
-                    inventoryWithEmptySlots[index] = item;
-                }
-            });
-
-            Webview.emit(InventoryEvents.Webview.Inventory_UpdateItems, inventoryWithEmptySlots);
-        } catch (error) {
-            console.error('Stack items error:', error);
+        const result = await inventoryService.handleStackItems(player, uidToStackOn, uidToStack);
+        if (!result.success) {
+            console.error('Failed to stack items:', result.error);
         }
     },
 );
 
 alt.onClient(InventoryEvents.Server.Inventory_SplitItems, async (player: alt.Player, uid: string, quantity: number) => {
-    try {
-        const rebarDocument = Rebar.document.character.useCharacter(player);
-        let inventory = [...rebarDocument.get().items];
-
-        const sourceItemIndex = inventory.findIndex((item) => item.uid === uid);
-        if (sourceItemIndex === -1) {
-            return;
-        }
-
-        const sourceItem = inventory[sourceItemIndex];
-
-        if (quantity <= 0 || quantity >= sourceItem.quantity) {
-            return;
-        }
-
-        const newItem = {
-            ...sourceItem,
-            uid: `${sourceItem.uid}_split_${Date.now()}`,
-            quantity: quantity,
-        };
-
-        let newInventory = inventory.map((item) => ({ ...item }));
-
-        newInventory[sourceItemIndex] = {
-            ...sourceItem,
-            quantity: sourceItem.quantity - quantity,
-        };
-
-        newInventory.push(newItem);
-
-        const oldTotal = inventory.reduce((sum, item) => sum + item.quantity, 0);
-        const newTotal = newInventory.reduce((sum, item) => sum + item.quantity, 0);
-        const oldWeight = inventory.reduce((sum, item) => sum + item.weight * item.quantity, 0);
-        const newWeight = newInventory.reduce((sum, item) => sum + item.weight * item.quantity, 0);
-
-        if (oldTotal !== newTotal || oldWeight !== newWeight) {
-            return;
-        }
-
-        rebarDocument.set('items', newInventory);
-
-        const Webview = useWebview(player);
-        const inventoryWithEmptySlots = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
-        newInventory.forEach((item, index) => {
-            if (index < inventoryWithEmptySlots.length) {
-                inventoryWithEmptySlots[index] = item;
-            }
-        });
-
-        Webview.emit(InventoryEvents.Webview.Inventory_UpdateItems, inventoryWithEmptySlots);
-    } catch (error) {
-        console.error('Split items error:', error);
+    const result = await inventoryService.handleSplitItems(player, uid, quantity);
+    if (!result.success) {
+        console.error('Failed to split items:', result.error);
     }
 });
 
-export function updateInventoryWebview(player: alt.Player) {
-    try {
-        const rebarDocument = Rebar.document.character.useCharacter(player).get();
-        const Webview = useWebview(player);
+alt.onClient(InventoryEvents.Server.Inventory_AssignToToolbar, async (player: alt.Player, item: Item, slot: number) => {
+    await toolbarService.handleAssignToToolbar(player, item, slot);
+});
 
-        const inventoryWithEmptySlots = new Array(InventoryConfig.itemManager.slots.maxSlots).fill(null);
-        const items = rebarDocument.items.map((item) => ({ ...item }));
-
-        items.forEach((item, index) => {
-            if (index < inventoryWithEmptySlots.length) {
-                inventoryWithEmptySlots[index] = item;
-            }
-        });
-
-        Webview.emit(InventoryEvents.Webview.Inventory_UpdateItems, inventoryWithEmptySlots);
-    } catch (error) {
-        console.error('Error updating inventory webview:', error);
+alt.onClient(InventoryEvents.Server.Inventory_EquipItem, async (player: alt.Player, item: Item, slotId: string) => {
+    const result = await equipmentService.handleEquipItem(player, item, slotId);
+    if (!result.success) {
+        console.error('Failed to equip item:', result.error);
     }
-}
+});
+
+alt.onClient(InventoryEvents.Server.Inventory_UnequipItem, async (player: alt.Player, slotId: string) => {
+    const result = await equipmentService.handleUnequipItem(player, slotId);
+    if (!result.success) {
+        console.error('Failed to unequip item:', result.error);
+    }
+});
+
+alt.onClient(
+    InventoryEvents.Server.Inventory_SwapItems,
+    async (player: alt.Player, fromIndex: number, toIndex: number) => {
+        const result = await inventoryService.handleSwapItems(player, fromIndex, toIndex);
+        if (!result.success) {
+            console.error('Failed to swap items:', result.error);
+        }
+    },
+);
+
+alt.onClient(
+    InventoryEvents.Server.Inventory_SwapToolbarItems,
+    async (player: alt.Player, fromSlot: number, toSlot: number) => {
+        const result = await toolbarService.handleSwapToolbarItems(player, fromSlot, toSlot);
+        if (!result.success) {
+            console.error('Failed to swap toolbar items:', result.error);
+        }
+    },
+);
+
+alt.onRpc(InventoryEvents.Server.Inventory_RequestItems, (player: alt.Player) => {
+    const rebarDocument = Rebar.document.character.useCharacter(player).get();
+    return rebarDocument.items || [];
+});
+
+alt.onRpc(InventoryEvents.RPC.Inventory_GetToolbar, (player: alt.Player) => {
+    const rebarDocument = Rebar.document.character.useCharacter(player).get();
+    return rebarDocument.toolbar || new Array(5).fill(null);
+});
+
+alt.onRpc(InventoryEvents.RPC.Inventory_GetEquipment, (player: alt.Player) => {
+    const rebarDocument = Rebar.document.character.useCharacter(player).get();
+    return rebarDocument.equipment || DEFAULT_EQUIPMENT_SLOTS;
+});
+
+alt.on('rebar:playerCharacterBound', async (player: alt.Player) => {
+    await Promise.all([
+        toolbarService.initializePlayerToolbar(player),
+        equipmentService.initializePlayerEquipment(player),
+    ]);
+
+    const rebarDocument = Rebar.document.character.useCharacter(player).get();
+    const Webview = useWebview(player);
+
+    Webview.emit(InventoryEvents.Webview.Inventory_UpdateToolbar, rebarDocument.toolbar || new Array(5).fill(null));
+    Webview.emit(InventoryEvents.Webview.Inventory_UpdateEquipment, rebarDocument.equipment || DEFAULT_EQUIPMENT_SLOTS);
+});

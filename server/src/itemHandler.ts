@@ -19,7 +19,9 @@ declare module '@Shared/types/Character.js' {
 
 alt.onClient(InventoryEvents.Server.Inventory_UseItem, async (player: alt.Player, item: Item) => {
     const ItemManager = await useApi().getAsync('item-manager-api');
-    ItemManager.usePlayerItemManager(player).use(item.uid);
+    const dbItem = ItemManager.useItemManager().getDatabaseItem(item.id);
+    const used = await ItemManager.usePlayerItemManager(player).use(item.uid);
+    alt.logWarning(`Using Item ${item.name} | event: ${item.useEventName} | UID: ${item.uid} | Used: ${used}`);
 });
 
 alt.on('inventory:useWeapon', async (player: alt.Player, item: Item) => {

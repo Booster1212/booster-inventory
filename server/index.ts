@@ -1,5 +1,11 @@
 import './src/keybind.js';
 import './src/itemHandler.js';
+
+import './src/services/InventoryService.js';
+import './src/services/ToolbarService.js';
+import './src/services/EquipmentService.js';
+import './src/services/ItemValidationService.js';
+
 import './src/inventoryHandler.js';
 
 import './src/items/weapons.js';

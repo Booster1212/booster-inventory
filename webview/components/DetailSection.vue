@@ -195,7 +195,6 @@ const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
 const isPropertiesVisible = ref(true);
-const isQuickAccessVisible = ref(true);
 
 const itemType = computed(() => {
     if (!props.selectedItem?.id) return '';
@@ -207,11 +206,6 @@ const itemType = computed(() => {
 });
 
 const hasProperties = computed(() => props.selectedItem && Object.keys(props.selectedItem.data).length > 0);
-
-const currentSlot = computed(() => {
-    if (!props.selectedItem) return -1;
-    return props.toolbarItems.findIndex((item) => item?.uid === props.selectedItem?.uid);
-});
 
 const handleDragStart = (event: DragEvent) => {
     if (!props.selectedItem || !event.dataTransfer) return;
@@ -245,10 +239,6 @@ const getValueColor = (key: string, value: any): string => {
         return 'text-red-400';
     }
     return 'text-white';
-};
-
-const isSlotOccupied = (slot: number): boolean => {
-    return props.toolbarItems[slot] !== null;
 };
 </script>
 

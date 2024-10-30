@@ -1,3 +1,4 @@
+//Inventory.vue
 <template>
     <div class="min-h-screen w-screen bg-gradient-to-b from-black via-slate-900/90 to-black text-white">
         <HeaderComponent
@@ -60,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useEvents } from '@Composables/useEvents';
 import { useInventory } from './composable/useInventory';
 import { useToolbar } from './composable/useToolbar';
@@ -68,7 +69,7 @@ import { useEquipment } from './composable/useEquipment';
 import { useItemSplit } from './composable/useItemSplit';
 import { useWeightManagement } from './composable/useWeightManagement';
 import { useItemValidation } from './composable/useItemValidation';
-import { Item } from '@Shared/types/items.js';
+import { Item } from '@Shared/types/items';
 import { InventoryEvents } from '../shared/events';
 
 import HeaderComponent from './components/header/Header.vue';
@@ -96,27 +97,28 @@ const {
     selectedItem,
     useItem,
     dropItem,
-    handleSwapItems,
-    handleStackItems,
-    handleUpdatePositions,
+    handleSwapItems: handleInventorySwap,
+    handleStackItems: handleInventoryStack,
+    handleUpdatePositions: handleInventoryPositions,
     loadInventory,
-    loadInventoryPositions,
     updateInventory,
 } = useInventory();
 
-const { toolbarItems, assignToHotkey, removeFromHotkey, loadToolbarFromStorage, updateToolbarItem } = useToolbar();
-const { equipmentSlots, equipItem, unequipItem, canEquipItem } = useEquipment();
+const { toolbarItems, assignToHotkey, removeFromHotkey, loadToolbar } = useToolbar();
+
+const { equipmentSlots, equipItem, unequipItem, canEquipItem, loadEquipment } = useEquipment();
+
 const { showSplitModal, selectedItemForSplit, handleSplitItem, closeSplitModal } = useItemSplit();
+
 const { formattedTotalWeight: totalWeight, getWeightStatus } = useWeightManagement(inventory);
+
 const { isValidItem } = useItemValidation();
 
 const setCurrentDragData = (data: DragData) => {
-    console.log('Setting current drag data:', data);
     currentDragData.value = data;
 };
 
 const clearCurrentDragData = () => {
-    console.log('Clearing current drag data');
     currentDragData.value = {
         item: null,
         sourceIndex: null,
@@ -135,63 +137,123 @@ const handleCloseDetails = () => {
 
 const handleUseItem = async (item: Item) => {
     if (!isValidItem(item)) return;
-    useItem(item);
+    await useItem(item);
 };
 
 const handleDropItem = async (item: Item) => {
     if (!isValidItem(item)) return;
-    dropItem(item);
+    await dropItem(item);
+    await events.emitServer(InventoryEvents.Server.Inventory_DropItem, item);
 };
 
-const handleAssignHotkey = (item: Item, slot: number) => {
+const handleAssignHotkey = async (item: Item, slot: number) => {
     if (!isValidItem(item)) return;
-    console.log('Assigning hotkey:', { item, slot });
 
-    const index = inventoryWithNulls.value.findIndex((i) => i?.uid === item.uid);
-    if (index === -1) return;
-
-    const newInventory = [...inventoryWithNulls.value];
-    newInventory[index] = null;
-
-    handleUpdatePositions(newInventory);
-    assignToHotkey(item, slot);
+    try {
+        await assignToHotkey(item, slot);
+    } catch (error) {
+        console.error('Error assigning hotkey:', error);
+    }
 };
 
-const handleRemoveHotkey = (slot: number) => {
+const handleRemoveHotkey = async (slot: number) => {
     const item = toolbarItems.value[slot];
     if (!item || !isValidItem(item)) return;
 
-    const emptySlotIndex = inventoryWithNulls.value.findIndex((i) => i === null);
-    if (emptySlotIndex === -1) return;
-
-    removeFromHotkey(slot);
-
-    const newInventory = [...inventoryWithNulls.value];
-    newInventory[emptySlotIndex] = item;
-    handleUpdatePositions(newInventory);
+    try {
+        await removeFromHotkey(slot);
+    } catch (error) {
+        console.error('Error removing hotkey:', error);
+    }
 };
 
-const handleEquipItem = (item: Item, slotId: string) => {
+const handleEquipItem = async (item: Item, slotId: string) => {
     if (!isValidItem(item) || !canEquipItem(item, slotId)) return;
-    equipItem(item, slotId);
+
+    try {
+        await equipItem(item, slotId);
+    } catch (error) {
+        console.error('Error equipping item:', error);
+    }
 };
 
-const handleUnequipItem = (slotId: string) => {
-    unequipItem(slotId);
+const handleUnequipItem = async (slotId: string) => {
+    try {
+        const item = await unequipItem(slotId);
+        if (item) {
+            const emptySlotIndex = inventoryWithNulls.value.findIndex((i) => i === null);
+            if (emptySlotIndex !== -1) {
+                const newInventory = [...inventoryWithNulls.value];
+                newInventory[emptySlotIndex] = item;
+                await handleInventoryPositions(newInventory);
+            }
+        }
+    } catch (error) {
+        console.error('Error unequipping item:', error);
+    }
 };
 
-const handleSplitConfirm = (item: Item, quantity: number) => {
+const handleSwapItems = async (fromIndex: number, toIndex: number) => {
+    try {
+        await handleInventorySwap(fromIndex, toIndex);
+        await events.emitServer(InventoryEvents.Server.Inventory_SwapItems, fromIndex, toIndex);
+    } catch (error) {
+        console.error('Error swapping items:', error);
+    }
+};
+
+const handleStackItems = async (uidToStackOn: string, uidToStack: string) => {
+    try {
+        await handleInventoryStack(uidToStackOn, uidToStack);
+        await events.emitServer(InventoryEvents.Server.Inventory_StackItems, uidToStackOn, uidToStack);
+    } catch (error) {
+        console.error('Error stacking items:', error);
+    }
+};
+
+const handleUpdatePositions = async (newArray: (Item | null)[]) => {
+    try {
+        await handleInventoryPositions(newArray);
+    } catch (error) {
+        console.error('Error updating positions:', error);
+    }
+};
+
+const handleSplitConfirm = async (item: Item, quantity: number) => {
     if (!isValidItem(item)) return;
-    handleSplitItem(item, quantity);
+    try {
+        await handleSplitItem(item, quantity);
+        await events.emitServer(InventoryEvents.Server.Inventory_SplitItems, item.uid, quantity);
+    } catch (error) {
+        console.error('Error splitting item:', error);
+    }
+};
+
+const initializeInventory = async () => {
+    try {
+        await Promise.all([loadInventory(), loadToolbar(), loadEquipment()]);
+    } catch (error) {
+        console.error('Error initializing inventory:', error);
+        events.emitServer(InventoryEvents.Webview.Inventory_Error, 'Failed to load inventory');
+    }
 };
 
 onMounted(async () => {
-    try {
-        loadToolbarFromStorage();
-        loadInventoryPositions();
-        await loadInventory();
-    } catch (error) {
-        console.error('Error initializing inventory:', error);
-    }
+    await initializeInventory();
+
+    events.on(InventoryEvents.Webview.Inventory_UpdateItems, updateInventory);
+    events.on(InventoryEvents.Webview.Inventory_UpdateToolbar, (items) => {
+        toolbarItems.value = items;
+    });
 });
+
+watch(
+    () => toolbarItems.value,
+    (newItems) => {
+        if (!currentDragData.value.item) {
+            events.emitServer(InventoryEvents.Webview.Inventory_UpdateToolbar, newItems);
+        }
+    },
+    { deep: true },
+);
 </script>
