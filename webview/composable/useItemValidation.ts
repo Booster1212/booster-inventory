@@ -13,11 +13,11 @@ export function useItemValidation() {
 
     const getItemType = (item: Item | null): string => {
         if (!item?.id) return 'Unknown';
-        if (item.id.includes('weapon')) return 'Weapon';
-        if (item.id.includes('medical')) return 'Medical';
-        if (item.id.includes('armor')) return 'Armor';
-        if (item.id.includes('food')) return 'Food';
-        if (item.id.includes('tool')) return 'Tool';
+        if (item.id.toString().includes('weapon')) return 'Weapon';
+        if (item.id.toString().includes('medical')) return 'Medical';
+        if (item.id.toString().includes('armor')) return 'Armor';
+        if (item.id.toString().includes('food')) return 'Food';
+        if (item.id.toString().includes('tool')) return 'Tool';
         return 'Item';
     };
 

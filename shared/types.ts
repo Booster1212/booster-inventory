@@ -20,7 +20,7 @@ export interface InventoryItem {
     description: string;
     image: string;
     metadata: ItemMetadata;
-    hotkey?: number; // New field for toolbar slots
+    hotkey?: number;
 }
 
 export interface EquipmentSlot {
@@ -31,44 +31,47 @@ export interface EquipmentSlot {
     allowedTypes?: string[]; // Optional array of item types that can be equipped in this slot
 }
 
-// Example of predefined equipment slot types
 export enum EquipmentSlotType {
-    HEAD = 'head',
-    FACE = 'face',
-    TORSO = 'torso',
-    BODY_ARMOR = 'body_armor',
-    HANDS = 'hands',
+    MASKS = 'masks',
     LEGS = 'legs',
-    FEET = 'feet',
-    ACCESSORY = 'accessory',
+    BAGS = 'bags',
+    SHOES = 'shoes',
+    ACCESSORIES = 'accessories',
+    UNDERSHIRTS = 'undershirts',
+    BODY_ARMORS = 'body_armors',
+    DECALS = 'decals',
+    TOPS = 'tops',
+    HATS = 'hats',
+    GLASSES = 'glasses',
+    EARS = 'ears',
+    WATCHES = 'watches',
+    BRACELETS = 'bracelets',
 }
 
-// Default equipment slots configuration
 export const DEFAULT_EQUIPMENT_SLOTS: EquipmentSlot[] = [
-    { id: EquipmentSlotType.HEAD, name: 'Headwear', icon: '🎩', item: null, allowedTypes: ['helmet', 'hat'] },
-    { id: EquipmentSlotType.FACE, name: 'Face', icon: '🕶️', item: null, allowedTypes: ['mask', 'glasses'] },
-    { id: EquipmentSlotType.TORSO, name: 'Torso', icon: '👕', item: null, allowedTypes: ['shirt', 'jacket'] },
-    { id: EquipmentSlotType.BODY_ARMOR, name: 'Body Armor', icon: '🛡️', item: null, allowedTypes: ['armor'] },
-    { id: EquipmentSlotType.HANDS, name: 'Hands', icon: '🧤', item: null, allowedTypes: ['gloves'] },
+    { id: EquipmentSlotType.MASKS, name: 'Masks', icon: '🎭', item: null, allowedTypes: ['mask'] },
+    { id: EquipmentSlotType.TOPS, name: 'Tops', icon: '👔', item: null, allowedTypes: ['top'] },
+    { id: EquipmentSlotType.UNDERSHIRTS, name: 'Undershirts', icon: '👚', item: null, allowedTypes: ['undershirt'] },
+    { id: EquipmentSlotType.BODY_ARMORS, name: 'Body Armors', icon: '🛡️', item: null, allowedTypes: ['armor'] },
     { id: EquipmentSlotType.LEGS, name: 'Legs', icon: '👖', item: null, allowedTypes: ['pants'] },
-    { id: EquipmentSlotType.FEET, name: 'Feet', icon: '👞', item: null, allowedTypes: ['shoes', 'boots'] },
+    { id: EquipmentSlotType.SHOES, name: 'Shoes', icon: '👞', item: null, allowedTypes: ['shoes', 'boots'] },
+    // { id: EquipmentSlotType.DECALS, name: 'Decals', icon: '🎨', item: null, allowedTypes: ['decal'] },
+    { id: EquipmentSlotType.ACCESSORIES, name: 'Accessories', icon: '⌚', item: null, allowedTypes: ['accessory'] },
     {
-        id: EquipmentSlotType.ACCESSORY,
-        name: 'Accessory',
-        icon: '⌚',
+        id: EquipmentSlotType.BAGS,
+        name: 'Bags & Parachutes',
+        icon: '🎒',
         item: null,
-        allowedTypes: ['accessory', 'jewelry', 'watch'],
+        allowedTypes: ['bag', 'parachute'],
     },
+    // Props
+    { id: EquipmentSlotType.HATS, name: 'Hats', icon: '🎩', item: null, allowedTypes: ['hat'] },
+    { id: EquipmentSlotType.GLASSES, name: 'Glasses', icon: '🕶️', item: null, allowedTypes: ['glasses'] },
+    { id: EquipmentSlotType.EARS, name: 'Ears', icon: '👂', item: null, allowedTypes: ['ear accessory'] },
+    { id: EquipmentSlotType.WATCHES, name: 'Watches', icon: '⌚', item: null, allowedTypes: ['watch'] },
+    { id: EquipmentSlotType.BRACELETS, name: 'Bracelets', icon: '📿', item: null, allowedTypes: ['bracelet'] },
 ];
 
-// Helper type for equipment state management
-export interface EquipmentState {
-    slots: EquipmentSlot[];
-    totalArmorRating?: number;
-    totalWeight?: number;
-}
-
-// Helper functions
 export const isItemEquippable = (item: Item, slot: EquipmentSlot): boolean => {
     if (!slot.allowedTypes || slot.allowedTypes.length === 0) return true;
     return slot.allowedTypes.includes(item.data.type as string);

@@ -7,28 +7,25 @@
                 draggable="true"
                 @dragstart="handleDragStart"
             >
-                <!-- Header -->
                 <div class="border-b border-white/10 p-6">
                     <div
-                        class="mb-4 inline-block rounded-lg bg-blue-500/10 px-3 py-1 text-xs font-medium uppercase text-blue-400"
+                        class="mb-4 inline-block rounded-lg bg-gradient-to-r from-blue-500/30 to-purple-500/30 px-3 py-1 text-xs font-medium uppercase text-blue-400"
                     >
-                        {{ getItemType(selectedItem) }}
+                        {{ itemType }}
                     </div>
-
-                    <h2 class="text-xl font-bold tracking-tight text-white">
-                        {{ selectedItem.name }}
-                    </h2>
+                    <h2 class="text-2xl font-bold tracking-tight text-white">{{ selectedItem.name }}</h2>
                 </div>
 
-                <!-- Content -->
                 <div class="custom-scrollbar flex-1 space-y-6 overflow-y-auto p-6">
-                    <!-- Main Stats -->
+                    <!-- Item Stats -->
                     <div class="grid grid-cols-2 gap-4">
                         <div
                             class="group relative overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-transparent p-3 transition-all duration-300 hover:border-white/30"
                         >
                             <div class="text-xs text-gray-500">Weight</div>
-                            <div class="mt-1 text-sm font-medium text-white">{{ selectedItem.weight }}kg</div>
+                            <div class="mt-1 text-sm font-medium text-white">
+                                {{ selectedItem.weight * selectedItem.quantity }}kg
+                            </div>
                         </div>
                         <div
                             class="group relative overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-transparent p-3 transition-all duration-300 hover:border-white/30"
@@ -38,13 +35,13 @@
                         </div>
                     </div>
 
-                    <!-- Description -->
+                    <!-- Item Description -->
                     <div class="rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-transparent p-3">
                         <p class="text-sm leading-relaxed text-gray-400">{{ selectedItem.desc }}</p>
                     </div>
 
-                    <!-- Properties -->
-                    <div v-if="Object.keys(selectedItem.data).length">
+                    <!-- Item Properties -->
+                    <div v-if="hasProperties">
                         <button
                             @click="isPropertiesVisible = !isPropertiesVisible"
                             class="mb-3 flex w-full items-center justify-between text-sm font-medium text-gray-500 transition-colors duration-200 hover:text-gray-300"
@@ -53,9 +50,8 @@
                             <span
                                 class="transform transition-transform duration-200"
                                 :class="{ 'rotate-180': !isPropertiesVisible }"
+                                >▼</span
                             >
-                                ▼
-                            </span>
                         </button>
                         <Transition name="slide">
                             <div v-show="isPropertiesVisible" class="grid gap-2">
@@ -74,7 +70,7 @@
                     </div>
 
                     <!-- Quick Access -->
-                    <div>
+                    <!-- <div>
                         <button
                             @click="isQuickAccessVisible = !isQuickAccessVisible"
                             class="mb-3 flex w-full items-center justify-between text-sm font-medium text-gray-500 transition-colors duration-200 hover:text-gray-300"
@@ -83,19 +79,17 @@
                             <span
                                 class="transform transition-transform duration-200"
                                 :class="{ 'rotate-180': !isQuickAccessVisible }"
+                                >▼</span
                             >
-                                ▼
-                            </span>
                         </button>
                         <Transition name="slide">
                             <div v-show="isQuickAccessVisible" class="grid grid-cols-5 gap-2">
-                                <div
+                                <button
                                     v-for="n in 5"
                                     :key="n"
                                     class="group relative aspect-square overflow-hidden"
-                                    @click="assignToHotkey(n - 1)"
-                                    @contextmenu.prevent="removeFromHotkey(n - 1)"
-                                    :class="{ 'cursor-pointer': true }"
+                                    @click="emit('assign-hotkey', selectedItem, n - 1)"
+                                    @contextmenu.prevent="emit('remove-hotkey', n - 1)"
                                 >
                                     <div
                                         class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-purple-500/20 opacity-0 blur transition-all duration-300 group-hover:opacity-100"
@@ -115,29 +109,32 @@
                                                     'text-yellow-500': isSlotOccupied(n - 1) && currentSlot !== n - 1,
                                                     'text-gray-500 group-hover:text-gray-300': !isSlotOccupied(n - 1),
                                                 }"
+                                                >{{ n }}</span
                                             >
-                                                {{ n }}
-                                            </span>
-                                            <span
+                                            <div
                                                 v-if="isSlotOccupied(n - 1) && currentSlot !== n - 1"
-                                                class="text-xs text-yellow-500/80"
+                                                class="absolute inset-0 overflow-hidden rounded-lg"
                                             >
-                                                Occupied
-                                            </span>
+                                                <img
+                                                    :src="toolbarItems[n - 1].icon"
+                                                    :alt="toolbarItems[n - 1].name"
+                                                    class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
+                                </button>
                             </div>
                         </Transition>
-                    </div>
+                    </div> -->
                 </div>
 
-                <!-- Actions -->
+                <!-- Action Buttons -->
                 <div class="border-t border-white/10 p-6">
                     <div class="grid gap-3">
                         <button
-                            @click="$emit('use-item', selectedItem)"
                             class="group relative w-full overflow-hidden rounded-lg"
+                            @click="emit('use-item', selectedItem)"
                         >
                             <div
                                 class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-blue-400/20 opacity-0 blur transition-all duration-300 group-hover:opacity-100"
@@ -149,8 +146,8 @@
                             </div>
                         </button>
                         <button
-                            @click="$emit('drop-item', selectedItem)"
                             class="group relative w-full overflow-hidden rounded-lg"
+                            @click="emit('drop-item', selectedItem)"
                         >
                             <div
                                 class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-red-500/20 to-red-400/20 opacity-0 blur transition-all duration-300 group-hover:opacity-100"
@@ -182,35 +179,49 @@
 import { ref, computed } from 'vue';
 import { Item } from '@Shared/types/items';
 
-const props = defineProps<{
+interface Props {
     selectedItem: Item | null;
     toolbarItems: Array<Item | null>;
-}>();
+}
 
-const emit = defineEmits<{
+interface Emits {
     (e: 'use-item', item: Item): void;
     (e: 'drop-item', item: Item): void;
     (e: 'assign-hotkey', item: Item, slot: number): void;
     (e: 'remove-hotkey', slot: number): void;
-}>();
+}
+
+const props = defineProps<Props>();
+const emit = defineEmits<Emits>();
 
 const isPropertiesVisible = ref(true);
 const isQuickAccessVisible = ref(true);
+
+const itemType = computed(() => {
+    if (!props.selectedItem?.id) return '';
+    if (props.selectedItem.id.toString().includes('weapon')) return 'Weapon';
+    if (props.selectedItem.id.toString().includes('medical')) return 'Medical';
+    if (props.selectedItem.id.toString().includes('armor')) return 'Armor';
+    if (props.selectedItem.id.toString().includes('food')) return 'Food';
+    return 'Item';
+});
+
+const hasProperties = computed(() => props.selectedItem && Object.keys(props.selectedItem.data).length > 0);
 
 const currentSlot = computed(() => {
     if (!props.selectedItem) return -1;
     return props.toolbarItems.findIndex((item) => item?.uid === props.selectedItem?.uid);
 });
 
-const getItemType = (item: Item): string => {
-    if (item.id.includes('weapon')) return 'Weapon';
-    if (item.id.includes('medical')) return 'Medical';
-    if (item.id.includes('armor')) return 'Armor';
-    return 'Item';
-};
+const handleDragStart = (event: DragEvent) => {
+    if (!props.selectedItem || !event.dataTransfer) return;
 
-const isSlotOccupied = (slot: number): boolean => {
-    return props.toolbarItems[slot] !== null;
+    event.dataTransfer.setData('application/json', JSON.stringify(props.selectedItem));
+    event.dataTransfer.effectAllowed = 'move';
+
+    const img = new Image();
+    img.src = props.selectedItem.icon;
+    event.dataTransfer.setDragImage(img, 36, 36);
 };
 
 const formatKey = (key: string): string => {
@@ -236,29 +247,8 @@ const getValueColor = (key: string, value: any): string => {
     return 'text-white';
 };
 
-const assignToHotkey = (slot: number) => {
-    if (!props.selectedItem) return;
-    console.log('[DEBUG] Assigning item to hotkey:', { item: props.selectedItem.name, slot });
-    emit('assign-hotkey', props.selectedItem, slot);
-};
-
-const removeFromHotkey = (slot: number) => {
-    console.log('[DEBUG] Removing item from hotkey:', slot);
-    if (props.toolbarItems[slot]) {
-        emit('remove-hotkey', slot);
-    }
-};
-
-const handleDragStart = (event: DragEvent) => {
-    if (!props.selectedItem || !event.dataTransfer) return;
-
-    console.log('[DEBUG] Starting drag from details panel:', props.selectedItem.name);
-    event.dataTransfer.setData('application/json', JSON.stringify(props.selectedItem));
-    event.dataTransfer.effectAllowed = 'move';
-
-    const img = new Image();
-    img.src = props.selectedItem.icon;
-    event.dataTransfer.setDragImage(img, 36, 36);
+const isSlotOccupied = (slot: number): boolean => {
+    return props.toolbarItems[slot] !== null;
 };
 </script>
 
@@ -276,15 +266,13 @@ const handleDragStart = (event: DragEvent) => {
 
 .slide-enter-active,
 .slide-leave-active {
-    transition: all 200ms ease-out;
-    max-height: 1000px;
+    transition: all 0.3s ease-out;
 }
 
 .slide-enter-from,
 .slide-leave-to {
     opacity: 0;
-    max-height: 0;
-    overflow: hidden;
+    transform: translateY(-10px);
 }
 
 .custom-scrollbar {

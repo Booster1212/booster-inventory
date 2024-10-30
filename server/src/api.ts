@@ -92,7 +92,7 @@ async function initializeInventoryAPI() {
         }
     }
 
-    async function removeItem(player: alt.Player, itemName: string, quantity: number = 1): Promise<boolean> {
+    async function removeItem(player: alt.Player, itemName: keyof RebarItems, quantity: number = 1): Promise<boolean> {
         try {
             const rebarDocument = Rebar.document.character.useCharacter(player);
             let currentItems = [...(rebarDocument.get().items || [])];
@@ -150,6 +150,10 @@ async function initializeInventoryAPI() {
         }
     }
 
+    function getItemImage(itemName: string) {
+        return ItemManager.useItemManager().getBaseItem(itemName)?.icon || '';
+    }
+
     const inventoryAPI = {
         addItem,
         removeItem,
@@ -158,6 +162,7 @@ async function initializeInventoryAPI() {
         canAddItem,
         getTotalWeight,
         updateInventoryWebview,
+        getItemImage,
     };
 
     useApi().register('inventory-api', inventoryAPI);
@@ -175,6 +180,7 @@ declare global {
             canAddItem: (player: alt.Player, item: Item) => boolean;
             getTotalWeight: (items: Item[]) => number;
             updateInventoryWebview: (player: alt.Player) => void;
+            getItemImage: (itemName: string) => string;
         };
     }
 }

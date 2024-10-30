@@ -3,6 +3,7 @@ import { useApi } from '@Server/api/index.js';
 import { useMessenger } from '@Server/systems/messenger.js';
 import { updateInventoryWebview } from './inventoryHandler.js';
 import { useRebar } from '@Server/index.js';
+import { RebarItems } from '@Shared/types/items.js';
 
 const Messenger = useMessenger();
 const Rebar = useRebar();
@@ -30,7 +31,7 @@ Messenger.commands.register({
 Messenger.commands.register({
     name: 'additem',
     desc: 'Adds item with quantity',
-    callback: async (player: alt.Player, name: string, quantity: string) => {
+    callback: async (player: alt.Player, name: keyof RebarItems, quantity: string) => {
         const ItemAPI = await useApi().getAsync('item-manager-api');
         if (isNaN(parseInt(quantity))) {
             Messenger.message.send(player, { content: 'Invalid quantity specified.', type: 'info' });

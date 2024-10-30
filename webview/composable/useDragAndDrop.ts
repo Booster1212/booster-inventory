@@ -1,106 +1,262 @@
-import { Item } from '@Shared/types/items.js';
-import { ref, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import { useItemValidation } from './useItemValidation.js';
+import { Item } from '@Shared/types/items.js';
+
+export type DragSource = 'inventory' | 'toolbar';
+
+interface DragState {
+    isDragging: boolean;
+    draggedItem: Item | null;
+    sourceIndex: number | null;
+    sourceType: DragSource | null;
+    startPosition: { x: number; y: number };
+    currentPosition: { x: number; y: number };
+    dragTimer: number | null;
+    isMouseDown: boolean;
+    dragStartTime: number;
+}
 
 export function useDragAndDrop() {
     const { isValidItem } = useItemValidation();
+    const DRAG_DELAY = 150;
+    const CLICK_THRESHOLD = 5;
+    const DRAG_TIME_THRESHOLD = 200;
 
-    const isDragging = ref(false);
-    const draggedItem = ref<Item | null>(null);
-    const dragSourceIndex = ref<number | null>(null);
-    const cursorPos = ref({ x: 0, y: 0 });
-    const mouseDownTimer = ref<number | null>(null);
-    const mouseDownPos = ref({ x: 0, y: 0 });
-    const currentHoverIndex = ref<number | null>(null);
-    const DRAG_DELAY = 200;
+    const dragState = ref<DragState>({
+        isDragging: false,
+        draggedItem: null,
+        sourceIndex: null,
+        sourceType: null,
+        startPosition: { x: 0, y: 0 },
+        currentPosition: { x: 0, y: 0 },
+        dragTimer: null,
+        isMouseDown: false,
+        dragStartTime: 0,
+    });
 
-    const cleanupDragState = () => {
-        isDragging.value = false;
-        draggedItem.value = null;
-        dragSourceIndex.value = null;
-        currentHoverIndex.value = null;
-        if (mouseDownTimer.value !== null) {
-            clearTimeout(mouseDownTimer.value);
-            mouseDownTimer.value = null;
-        }
-        window.removeEventListener('mousemove', handleGlobalMouseMove);
-        window.removeEventListener('mouseup', handleGlobalMouseUp);
-    };
+    let ghostElement: HTMLElement | null = null;
+    let dragStartDistance = 0;
+    let preservedState: Partial<DragState> | null = null;
 
-    const handleMouseDown = (event: MouseEvent, index: number, item: Item | null) => {
-        if (!item || !isValidItem(item)) return;
-
-        mouseDownPos.value = { x: event.clientX, y: event.clientY };
-        cursorPos.value = { x: event.clientX, y: event.clientY };
-
-        if (mouseDownTimer.value !== null) {
-            clearTimeout(mouseDownTimer.value);
+    const createGhostElement = (item: Item) => {
+        if (ghostElement) {
+            ghostElement.parentNode?.removeChild(ghostElement);
         }
 
-        mouseDownTimer.value = window.setTimeout(() => {
-            isDragging.value = true;
-            draggedItem.value = item;
-            dragSourceIndex.value = index;
-        }, DRAG_DELAY) as unknown as number;
+        ghostElement = document.createElement('div');
+        ghostElement.className = 'fixed pointer-events-none z-50';
+        ghostElement.style.cssText = `
+            width: 72px;
+            height: 72px;
+            position: fixed;
+            left: ${dragState.value.startPosition.x}px;
+            top: ${dragState.value.startPosition.y}px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            will-change: transform;
+            transition: transform 0.1s ease;
+            background: none;
+        `;
 
-        window.addEventListener('mousemove', handleGlobalMouseMove);
-        window.addEventListener('mouseup', handleGlobalMouseUp);
+        ghostElement.innerHTML = `
+            <div class="relative h-full w-full overflow-hidden rounded-lg border border-blue-500/50 bg-none">
+                <img 
+                    src="${item.icon}" 
+                    alt="${item.name}" 
+                    class="h-full w-full object-cover"
+                    draggable="false"
+                />
+                <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 p-2">
+                    <div class="truncate text-xs font-medium text-gray-300">${item.name}</div>
+                </div>
+                ${
+                    item.quantity > 1
+                        ? `<div class="absolute right-1 top-1 rounded bg-black/80 px-1.5 py-0.5 text-xs font-medium text-gray-300">
+                        ${item.quantity}x
+                       </div>`
+                        : ''
+                }
+            </div>
+        `;
+
+        document.body.appendChild(ghostElement);
     };
 
-    const handleGlobalMouseMove = (event: MouseEvent) => {
-        if (mouseDownTimer.value !== null) {
-            const dx = event.clientX - mouseDownPos.value.x;
-            const dy = event.clientY - mouseDownPos.value.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+    const preserveState = () => {
+        preservedState = {
+            draggedItem: dragState.value.draggedItem,
+            sourceIndex: dragState.value.sourceIndex,
+            sourceType: dragState.value.sourceType,
+        };
+    };
 
-            if (distance > 5) {
-                clearTimeout(mouseDownTimer.value);
-                mouseDownTimer.value = null;
-            }
+    const restoreState = () => {
+        if (preservedState) {
+            dragState.value.draggedItem = preservedState.draggedItem || null;
+            dragState.value.sourceIndex = preservedState.sourceIndex || null;
+            dragState.value.sourceType = preservedState.sourceType || null;
+        }
+    };
+
+    const cleanup = () => {
+        preserveState();
+
+        if (dragState.value.dragTimer) {
+            window.clearTimeout(dragState.value.dragTimer);
         }
 
-        if (isDragging.value) {
-            cursorPos.value = { x: event.clientX, y: event.clientY };
+        if (ghostElement && ghostElement.parentNode) {
+            ghostElement.parentNode.removeChild(ghostElement);
+            ghostElement = null;
+        }
+
+        dragState.value = {
+            ...dragState.value,
+            isDragging: false,
+            startPosition: { x: 0, y: 0 },
+            currentPosition: { x: 0, y: 0 },
+            dragTimer: null,
+            isMouseDown: false,
+        };
+
+        document.body.style.cursor = '';
+    };
+
+    const fullCleanup = () => {
+        if (ghostElement && ghostElement.parentNode) {
+            ghostElement.parentNode.removeChild(ghostElement);
+            ghostElement = null;
+        }
+
+        preservedState = null;
+        dragStartDistance = 0;
+
+        dragState.value = {
+            isDragging: false,
+            draggedItem: null,
+            sourceIndex: null,
+            sourceType: null,
+            startPosition: { x: 0, y: 0 },
+            currentPosition: { x: 0, y: 0 },
+            dragTimer: null,
+            isMouseDown: false,
+            dragStartTime: 0,
+        };
+
+        document.body.style.cursor = '';
+    };
+
+    const handleMouseDown = (event: MouseEvent, index: number, item: Item, sourceType: DragSource) => {
+        if (!isValidItem(item) || event.button !== 0) return;
+
+        dragStartDistance = 0;
+        preservedState = null;
+
+        dragState.value = {
+            ...dragState.value,
+            isDragging: false,
+            isMouseDown: true,
+            startPosition: { x: event.clientX, y: event.clientY },
+            currentPosition: { x: event.clientX, y: event.clientY },
+            draggedItem: item,
+            sourceIndex: index,
+            sourceType,
+            dragStartTime: Date.now(),
+            dragTimer: window.setTimeout(() => {
+                if (dragState.value.isMouseDown && dragStartDistance < CLICK_THRESHOLD) {
+                    startDrag();
+                }
+            }, DRAG_DELAY) as unknown as number,
+        };
+
+        preserveState();
+        document.addEventListener('mouseup', handleGlobalMouseUp, { once: true });
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+        if (!dragState.value.isMouseDown) return;
+
+        const dx = event.clientX - dragState.value.startPosition.x;
+        const dy = event.clientY - dragState.value.startPosition.y;
+        dragStartDistance = Math.sqrt(dx * dx + dy * dy);
+
+        if (dragStartDistance > CLICK_THRESHOLD && !dragState.value.isDragging && dragState.value.dragTimer) {
+            window.clearTimeout(dragState.value.dragTimer);
+            dragState.value.dragTimer = null;
+            startDrag();
+        }
+
+        if (dragState.value.isDragging && ghostElement) {
+            ghostElement.style.left = `${event.clientX}px`;
+            ghostElement.style.top = `${event.clientY}px`;
+            dragState.value.currentPosition = { x: event.clientX, y: event.clientY };
+            document.body.style.cursor = 'grabbing';
         }
     };
 
-    const handleGlobalMouseUp = () => {
-        cleanupDragState();
+    const startDrag = () => {
+        if (!dragState.value.draggedItem) return;
+
+        dragState.value.isDragging = true;
+        preserveState();
+        createGhostElement(dragState.value.draggedItem);
+        document.body.style.cursor = 'grabbing';
     };
 
-    const handleMouseEnter = (index: number) => {
-        currentHoverIndex.value = index;
+    const handleGlobalMouseUp = (event: MouseEvent) => {
+        document.body.style.cursor = '';
+        cleanup();
     };
 
-    const handleMouseLeave = (index: number) => {
-        if (currentHoverIndex.value === index) {
-            currentHoverIndex.value = null;
-        }
+    const handleMouseUp = (event: MouseEvent, targetIndex: number, targetType: DragSource) => {
+        restoreState();
+
+        const dragTime = Date.now() - dragState.value.dragStartTime;
+        const wasClick = dragStartDistance < CLICK_THRESHOLD && dragTime < DRAG_TIME_THRESHOLD;
+
+        const result = {
+            wasClick,
+            sourceIndex: dragState.value.sourceIndex,
+            sourceType: dragState.value.sourceType,
+            targetIndex,
+            targetType,
+            item: dragState.value.draggedItem,
+            _debug: {
+                dragDistance: dragStartDistance,
+                dragTime,
+                thresholds: {
+                    distance: CLICK_THRESHOLD,
+                    time: DRAG_TIME_THRESHOLD,
+                },
+            },
+        };
+
+        console.log('DragAndDrop MouseUp:', JSON.stringify(result, undefined, 4));
+
+        cleanup();
+        return result;
     };
 
-    const isDraggingFromIndex = (index: number): boolean => {
-        return isDragging.value && dragSourceIndex.value === index;
+    const isDraggingFromIndex = (index: number, type: DragSource): boolean => {
+        return (
+            dragState.value.isDragging && dragState.value.sourceIndex === index && dragState.value.sourceType === type
+        );
     };
 
-    const isHoveringIndex = (index: number): boolean => {
-        return currentHoverIndex.value === index;
-    };
-
-    onUnmounted(() => {
-        cleanupDragState();
+    const getDragData = () => ({
+        sourceIndex: dragState.value.sourceIndex,
+        sourceType: dragState.value.sourceType,
+        item: dragState.value.draggedItem,
     });
 
     return {
-        isDragging,
-        draggedItem,
-        dragSourceIndex,
-        cursorPos,
-        currentHoverIndex,
+        isDragging: computed(() => dragState.value.isDragging),
+        draggedItem: computed(() => dragState.value.draggedItem),
         handleMouseDown,
-        handleMouseEnter,
-        handleMouseLeave,
-        cleanupDragState,
+        handleMouseMove,
+        handleMouseUp,
         isDraggingFromIndex,
-        isHoveringIndex,
+        getDragData,
+        cleanup: fullCleanup,
     };
 }

@@ -1,4 +1,5 @@
 import './src/keybind.js';
+import './src/itemHandler.js';
 import './src/inventoryHandler.js';
 
 import './src/items/weapons.js';

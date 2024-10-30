@@ -6,7 +6,7 @@ import { ref, computed } from 'vue';
 import { useItemValidation } from './useItemValidation.js';
 
 export function useInventory() {
-    const { isValidItem } = useItemValidation();
+    const { isValidItem, canItemsStack } = useItemValidation();
     const events = useEvents();
     const inventory = ref<Item[]>([]);
     const itemPositions = ref<Record<string, number>>({});
@@ -137,7 +137,14 @@ export function useInventory() {
     };
 
     const handleStackItems = (uidToStackOn: string, uidToStack: string) => {
-        if (uidToStackOn === uidToStack) return false;
+        if (
+            uidToStackOn === uidToStack ||
+            !canItemsStack(
+                inventoryWithNulls.value[itemPositions.value[uidToStackOn]],
+                inventoryWithNulls.value[itemPositions.value[uidToStack]],
+            )
+        )
+            return false;
         events.emitServer(InventoryEvents.Server.Inventory_StackItems, uidToStackOn, uidToStack);
         return true;
     };

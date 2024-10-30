@@ -31,6 +31,7 @@ export const weapons: Array<Item> = [
         data: {
             condition: 100,
             ammo: '30/30',
+            isToolbar: true,
         },
     },
     {
@@ -46,6 +47,7 @@ export const weapons: Array<Item> = [
         data: {
             condition: 100,
             ammo: '30/30',
+            isToolbar: true,
         },
     },
     {
